@@ -1,23 +1,61 @@
+const yargs = require('yargs/yargs');
+const { hideBin } = require('yargs/helpers');
+const fs = require('fs-extra');
+
+const { execSync, spawn } = require('child_process');
+
+const kill = require('tree-kill');
+
+const path = require('path');
+
+const { argv } = yargs(hideBin(process.argv));
+
+/**
+ * Recursively create a path if it doesn't exist
+ * 
+ * @param {string} str the path to check and create
+ */
+const mkdirSyncIfMissing = (s) => !fs.existsSync(s) && fs.mkdirSync(s, { recursive: true });
+
+/**
+ * Write to a file. Will create the file & destination folder if they don't exist
+ * 
+ * BASED ON https://gist.github.com/drodsou/de2ba6291aea67ffc5bc4b52d8c32abd?permalink_comment_id=4137595#gistcomment-4137595
+ * 
+ * @param {string} filepath the path of the file to write to
+ * @param {string} content the contents to write to the file
+ */
+const writeFileSyncRecursive = (filepath, content = '') => {
+    mkdirSyncIfMissing(path.dirname(filepath));
+    fs.writeFileSync(filepath, content, { flag: 'w' });
+};
+
+const getDirectories = (srcpath) => (
+    fs.existsSync(srcpath) ? fs.readdirSync(srcpath) : []
+).map((file) => path.join(srcpath, file))
+    .filter((filepath) => fs.statSync(filepath).isDirectory());
+
+const getFiles = (srcpath) => (
+    fs.existsSync(srcpath) ? fs.readdirSync(srcpath) : []
+).map((file) => path.join(srcpath, file))
+    .filter((filepath) => !fs.statSync(filepath).isDirectory());
+
 module.exports = (config = {}) => {
-    const yargs = require('yargs/yargs');
-    const { hideBin } = require('yargs/helpers');
-    const fs = require('fs-extra');
-
-    const path = require('path');
-
-    const { argv } = yargs(hideBin(process.argv));
-
     const fullConfig = { ...config, ...argv };
-
-    const { execSync, spawn } = require('child_process');
-
-    const kill = require('tree-kill');
 
     const cypressConfigFilepath = fullConfig.cypressConfig?.filepath ? path.resolve(fullConfig.cypressConfig.filepath) : null;
     const cypressConfigObject = fullConfig.cypressConfig?.object;
     const reportDir = fullConfig.reportDir ? path.join(fullConfig.reportDir) : null;
     const specsDir = fullConfig.specsDir ? path.resolve(fullConfig.specsDir) : null;
     const maxThreadRestarts = fullConfig.maxThreadRestarts || 5;
+    const waitForFileExistTimeout = fullConfig.waitForFileExist?.timeout || 60;
+    const threadTimeout = fullConfig.threadTimeout || 600;
+
+    const errorThreads = [];
+    const warnThreads = [];
+    const threadHeadings = {};
+
+    const threadLogsDir = path.join(reportDir, 'cypress-logs');
 
     const runShellCommand = (cmd) => {
         execSync(cmd, {
@@ -25,16 +63,6 @@ module.exports = (config = {}) => {
             stdio: [null, process.stdout, process.stderr],
         });
     };
-
-    const getDirectories = (srcpath) => (
-        fs.existsSync(srcpath) ? fs.readdirSync(srcpath) : []
-    ).map((file) => path.join(srcpath, file))
-        .filter((filepath) => fs.statSync(filepath).isDirectory());
-
-    const getFiles = (srcpath) => (
-        fs.existsSync(srcpath) ? fs.readdirSync(srcpath) : []
-    ).map((file) => path.join(srcpath, file))
-        .filter((filepath) => !fs.statSync(filepath).isDirectory());
 
     let exitCode = 0;
 
@@ -64,9 +92,7 @@ module.exports = (config = {}) => {
     console.log(`${testThreads.length} thread${testThreads.length !== 1 ? 's' : ''} will be created to test spec files in the following director${testThreads.length !== 1 ? 'ies' : 'y'}:\n${wordpressTestThreadDirs.join('\n')}\n`);
 
     (async () => {
-        let restartAttempts = 0;
-
-        async function runCypressTests() {
+        async function spawnThread(thread, threadNo, logs = '', restartAttempts = 0) {
             let restartTests = false;
 
             const cypressProcess = spawn('bash', [
@@ -75,14 +101,34 @@ module.exports = (config = {}) => {
                 threadPerformanceFilepath || '',// $1
                 allureResultsPath || '',// $2
                 cypressConfigFilepath || '',// $3
-                fullConfig.waitForFileExist?.filepath || '',// $4
-                fullConfig.waitForFileExist?.timeout || 60,// $5
-            ].concat(
-                testThreads, // $6 + every additional thread is passed as an extra argument
-            ));
+                thread,// $4
+                threadNo,// $5
+            ]);
+
+            const customWarning = (str) => {
+                console.warn(str);
+                logs += `${str}\n`;
+            }
+
+            let inactivityTimer;
+
+            const setInactivityTimer = () => {
+                clearTimeout(inactivityTimer);
+                inactivityTimer = setTimeout(() => {
+                    customWarning(`The Cypress instance in thread #${threadNo} hasn\'t responded for ${threadTimeout} seconds and will be considered a crash.`);
+
+                    kill(cypressProcess.pid);
+                }, threadTimeout * 1000);
+            };
+
+            setInactivityTimer();
 
             // detect known internal errors and restart the tests when they occur!
             const logCheck = async (log) => {
+                setInactivityTimer();
+
+                logs += log;
+
                 if (
                     log.includes('uncaught error was detected outside of a test')
                     || log.includes('we are skipping the remaining tests in the current suite')
@@ -105,40 +151,96 @@ module.exports = (config = {}) => {
             });
 
             return new Promise((resolve) => {
-                cypressProcess.on('close', async (code) => {
+                cypressProcess.on('close', async () => {
+                    clearTimeout(inactivityTimer);
+
                     if (restartTests) {
                         setTimeout(async () => {
-                            restartAttempts += 1;
+                            restartAttempts++;
 
                             if (restartAttempts < maxThreadRestarts) {
-                                console.warn(
-                                    `WARNING: Internal Cypress error! Will retry a maximum of ${maxThreadRestarts - restartAttempts} more time${(maxThreadRestarts - restartAttempts) !== 1 ? 's' : ''}.`,
-                                );
+                                if (!warnThreads.includes(threadNo)) warnThreads.push(threadNo);
+
+                                customWarning(`WARNING: Internal Cypress error in thread #${threadNo}! Will retry a maximum of ${maxThreadRestarts - restartAttempts} more time${(maxThreadRestarts - restartAttempts) !== 1 ? 's' : ''}.`);
 
                                 // delete any test results as they'll interfere with the next run
-                                fs.rmSync(reportDir, { recursive: true, force: true });
+                                if (fs.pathExistsSync(path.join(allureResultsPath, String(threadNo)))) {
+                                    fs.rmSync(path.join(allureResultsPath, String(threadNo)), { recursive: true, force: true });
+                                }
 
-                                await runCypressTests(code);
+                                await spawnThread(thread, threadNo, logs, restartAttempts);
                             } else {
-                                console.error(
-                                    `CRITICAL ERROR: Too many internal Cypress errors. Giving up after ${maxThreadRestarts} attempts!`,
-                                );
-                                process.exit(1);
+                                if (!errorThreads.includes(threadNo)) errorThreads.push(threadNo);
+
+                                customWarning(`CRITICAL ERROR: Too many internal Cypress errors in thread #${threadNo}. Giving up after ${maxThreadRestarts} attempts!`);
+
+                                writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
+
+                                exitCode = 1;
                             }
 
                             resolve();
                         }, 1000);
                     } else {
+                        writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
                         resolve();
                     }
                 });
             });
         }
 
+        const waitForFileExist = (ms) => {
+            let waitForFileExistRemainingTime = waitForFileExistTimeout;
+            const file = fullConfig.waitForFileExist.filepath;
+
+            return new Promise(resolve => setInterval(() => {
+                if (fs.existsSync(file)) {
+                    resolve();
+                } else {
+                    waitForFileExistRemainingTime--;
+
+                    if (!waitForFileExistRemainingTime) {
+                        console.warn(`WARNING: There may be an issue as the ${file} file hasn\'t been created after ${waitForFileExistTimeout} seconds... will continue anyway!`);//TODO save this log somewhere
+                        resolve();
+                    }
+                }
+            }, ms));
+        }
+
+        const delay = (ms) => {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function runCypressTests() {
+            let threadsArr = []
+            threadsArr.push(spawnThread(testThreads[0], 1));
+
+            if (testThreads.length > 1) {
+                if (fullConfig.waitForFileExist?.filepath) {
+                    await waitForFileExist(5000);
+                } else {
+                    await delay(5000);
+                }
+
+                threadsArr.push(spawnThread(testThreads[1], 2));
+
+                for (const [index, thread] of testThreads.slice(2).entries()) {
+                    await delay(5000);
+                    threadsArr.push(spawnThread(thread, Number(index) + 3));
+                }
+            }
+
+            await Promise.all(threadsArr)
+        }
+
         await runCypressTests();
 
+        console.log('All Cypress testing threads have ended.');
+
+        let reportText = '';
+
         // bulk of multithread report logic
-        if (wordpressTestThreadDirs.length > 1) {
+        {
             const secondsToNaturalString = (seconds) => {
                 const minutes = Math.floor(seconds / 60);
                 const remainingSeconds = seconds - (minutes * 60);
@@ -158,14 +260,15 @@ module.exports = (config = {}) => {
                 .trim()
                 .split('\n')
                 .sort(collator.compare)
-                .forEach((csvRow, index) => {
+                .forEach((csvRow) => {
                     const secs = Number(csvRow.split(',')[1]);
+                    const index = Number(csvRow.split(',')[0]);// get the index from the csv in case any thread DNF
 
                     const failedTests = {};
 
                     // record how many tests failed, and how many times!
                     getFiles(
-                        path.join(allureResultsPath, String(index + 1)),
+                        path.join(allureResultsPath, String(index)),
                     ).forEach((file) => {
                         if (file.endsWith('.json')) {
                             const { status, labels, fullName } = fs.readJsonSync(file);
@@ -217,10 +320,12 @@ module.exports = (config = {}) => {
                     const threadId = testThreads.length > 9 ? String(index + 1).padStart(2, '0') : index + 1;
 
                     str += `Thread #${threadId} [${threadPath}]\n`;
+                    threadHeadings[index + 1] = `Thread #${threadId} [${threadPath}]\n`;
 
                     // if there's a very high number of threads, they're prone to ending early
                     if (!threadPerformanceResults[index]) {
                         str += 'CRITICAL ERROR: Thread did not complete!\n\n';
+                        threadHeadings[index + 1] += '<br>CRITICAL ERROR: Thread did not complete!';
                         exitCode = 1;
                         return;
                     }
@@ -239,6 +344,8 @@ module.exports = (config = {}) => {
                             return '';
                         }
 
+                        if (!warnThreads.includes(index + 1)) warnThreads.push(index + 1);
+
                         const counts = Object.values(obj).reduce((acc, curr) => {
                             acc[curr] = (acc[curr] || 0) + 1;
                             return acc;
@@ -249,6 +356,8 @@ module.exports = (config = {}) => {
                             result.push(`${counts[num]} test${counts[num] > 1 ? 's' : ''} failed ${num} time${num > 1 ? 's' : ''}`);
                         });
 
+                        threadHeadings[index + 1] += `<br>WARNING: ${result.join(', ')}`;
+
                         return ` (WARNING: ${result.join(', ')})`;
                     };
 
@@ -258,7 +367,7 @@ module.exports = (config = {}) => {
                 return str;
             };
 
-            const reportText = `See below to compare how each thread is performing.\n\n${generateThreadBars(longestThread.secs)}The percentages given above represent how much time individual threads take relative to thread #${longestThread.index + 1}, which took the longest to complete at ${longestThread.naturalString}. Any thread that takes significantly longer than others will be a bottleneck, so the closer the percentages are to one another, the better. A wide range in percentages indicates that the threads could be balanced more efficiently. Any failing tests will retry up to two more times, so in those instances the affected threads will take much longer to complete than if all tests passed on the first attempt.`;
+            reportText = `See below to compare how each thread is performing.\n\n${generateThreadBars(longestThread.secs)}The percentages given above represent how much time individual threads take relative to thread #${longestThread.index}, which took the longest to complete at ${longestThread.naturalString}. Any thread that takes significantly longer than others will be a bottleneck, so the closer the percentages are to one another, the better. A wide range in percentages indicates that the threads could be balanced more efficiently. Any failing tests will retry up to two more times, so in those instances the affected threads will take much longer to complete than if all tests passed on the first attempt.`;
 
             console.log(`\n\n${reportText}\n\n`);
 
@@ -304,12 +413,47 @@ module.exports = (config = {}) => {
 
         const allureReportHtml = path.resolve(reportDir, 'allure-report', 'index.html');
 
-        // hack to remove some dodgy html that breaks allure-combine
         if (fs.existsSync(allureReportHtml)) {
+            let allLogs = '';
+
+            getFiles(
+                threadLogsDir
+            ).forEach((file) => {
+                const threadNo = file.split('_')[1].split('.txt')[0];
+
+                allLogs += `<div class="cmr-thread ${errorThreads.includes(Number(threadNo)) ? 'cmr-error' : warnThreads.includes(Number(threadNo)) ? 'cmr-warn' : ''}"><h2>${threadHeadings[threadNo]}</h2><pre>${fs.readFileSync(file).toString('utf8')}</pre></div>`;
+            });
+
             fs.writeFileSync(
                 allureReportHtml,
                 fs.readFileSync(allureReportHtml)
-                    .toString('utf8').replace(/.*(googletagmanager|gtag|dataLayer|<script>|\n<\/script>).*/gm, '')
+                    .toString('utf8')
+                    .replace(/.*(googletagmanager|gtag|dataLayer|<script>|\n<\/script>).*/gm, '')// hack to remove some dodgy html that breaks allure-combine
+                    .replace('</body>', `<div class="cmr-content">${allLogs.replace(/Couldn't find tsconfig.json. tsconfig-paths will be skipped\n/g, '')}<div class="cmr-report"><h2>Thread Performance Summary</h2><pre>${reportText}</pre></div></div>
+                    
+                    <style>.cmr-content div:nth-child(even){
+                        filter: brightness(0.9);
+                        }
+
+                        .cmr-content pre {
+                        overflow-wrap: break-word;
+                        }
+                        
+                        .cmr-content div {
+                        padding: 20px;
+                        background: white;
+                        }
+                        
+                        .cmr-content div.cmr-error {
+                        background: #e97c7f;
+                        }
+
+                        .cmr-content div.cmr-warn {
+                        background: #e0c170;
+                        }
+                        </style>
+
+                    </body>`)
             )
         }
 
