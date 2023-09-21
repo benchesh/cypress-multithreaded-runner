@@ -40,6 +40,8 @@ const getFiles = (srcpath) => (
 ).map((file) => path.join(srcpath, file))
     .filter((filepath) => !fs.statSync(filepath).isDirectory());
 
+const arrToNaturalStr = (arr) => arr.join(', ').replace(/,\s([^,]+)$/, ' and $1');
+
 module.exports = (config = {}) => {
     const fullConfig = { ...config, ...argv };
 
@@ -54,6 +56,8 @@ module.exports = (config = {}) => {
     const errorThreads = [];
     const warnThreads = [];
     const threadHeadings = {};
+
+    let allureReportWarningSummary = [];
 
     const threadLogsDir = path.join(reportDir, 'cypress-logs');
 
@@ -356,9 +360,11 @@ module.exports = (config = {}) => {
                             result.push(`${counts[num]} test${counts[num] > 1 ? 's' : ''} failed ${num} time${num > 1 ? 's' : ''}`);
                         });
 
-                        threadHeadings[index + 1] += `<br>WARNING: ${result.join(', ')}`;
+                        threadHeadings[index + 1] += `<br>WARNING: ${arrToNaturalStr(result)}`;
 
-                        return ` (WARNING: ${result.join(', ')})`;
+                        allureReportWarningSummary.push(`In thread #${index + 1}: ${arrToNaturalStr(result)}`);
+
+                        return ` (WARNING: ${arrToNaturalStr(result)})`;
                     };
 
                     str += `${percentageBar} ${percentageOfTotal.toFixed(2)}% (${threadPerformanceResults[index].naturalString})${reportFailedTests(threadPerformanceResults[index].failedTests)}\n\n`;
@@ -429,9 +435,37 @@ module.exports = (config = {}) => {
                 fs.readFileSync(allureReportHtml)
                     .toString('utf8')
                     .replace(/.*(googletagmanager|gtag|dataLayer|<script>|\n<\/script>).*/gm, '')// hack to remove some dodgy html that breaks allure-combine
+                    .replace('<body>', `<body>
+                    <div class="cmr-content">
+                        ${errorThreads.length ? `
+                        <div class="cmr-error">
+                            <h2>Cypress Multithreaded Runner [PLEASE READ]</h2>
+                            Be advised! This Allure report doesn't tell the full story, as thread ${arrToNaturalStr(errorThreads.map(num => `#${num}`))} had ${errorThreads.length > 1 ? 'critical errors' : 'a critical error'} and didn't complete! Therefore, one or more tests may have not been tested! Scroll down to read the full logs from the separate threads.
+                        </div>` : ''}
+                        ${warnThreads.length ? `
+                        <div class="cmr-warn">
+                            ${errorThreads.length ? '' : '<h2>Cypress Multithreaded Runner</h2>'}
+                            ${allureReportWarningSummary.join('<br>')}${errorThreads.length ? '' : '<br>Scroll down to read the full logs from the separate threads.'}
+                        </div>` : ''}
+                        ${!errorThreads.length && !warnThreads.length ? `
+                        <div>
+                            <h2>Cypress Multithreaded Runner</h2>
+                            Everything seems completely fine! No tests needed retrying. Scroll down to read the full logs from the separate threads.
+                        </div>
+                        `: ''}
+                    </div>`)
                     .replace('</body>', `<div class="cmr-content">${allLogs.replace(/Couldn't find tsconfig.json. tsconfig-paths will be skipped\n/g, '')}<div class="cmr-report"><h2>Thread Performance Summary</h2><pre>${reportText}</pre></div></div>
                     
-                    <style>.cmr-content div:nth-child(even){
+                    <style>
+                        .cmr-content {
+                        overflow-x: auto;
+                        }
+
+                        .cmr-content h2 {
+                        margin-top:0;
+                        }
+
+                        .cmr-content div:nth-child(even){
                         filter: brightness(0.9);
                         }
 
@@ -442,14 +476,16 @@ module.exports = (config = {}) => {
                         .cmr-content div {
                         padding: 20px;
                         background: white;
+                        min-width: 890px;
+                        display: block;
                         }
                         
                         .cmr-content div.cmr-error {
-                        background: #e97c7f;
+                        background: #ff686c;
                         }
 
                         .cmr-content div.cmr-warn {
-                        background: #e0c170;
+                        background: #ffcc45;
                         }
                         </style>
 
