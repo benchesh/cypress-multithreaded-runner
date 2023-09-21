@@ -1,3 +1,5 @@
+// NOTE: Comments and general structure of this file are WIP
+
 const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
 const fs = require('fs-extra');
