@@ -345,7 +345,7 @@ module.exports = (config = {}) => {
                     str += `${threadsMeta[index + 1].heading[0]}\n`;
 
                     // if there's a very high number of threads, they're prone to ending early
-                    if (!Object.entries(threadsMeta[index + 1].perfResults).length) {
+                    if (threadsMeta[index + 1].errorType === 'critical' || !Object.entries(threadsMeta[index + 1].perfResults).length) {
                         const err = 'CRITICAL ERROR: Thread did not complete!';
                         threadsMeta[index + 1].heading.push(err);
                         str += `${err}\n\n`;
