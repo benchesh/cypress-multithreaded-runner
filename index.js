@@ -19,6 +19,11 @@ const { argv } = yargs(hideBin(process.argv));
  */
 const mkdirSyncIfMissing = (s) => !fs.existsSync(s) && fs.mkdirSync(s, { recursive: true });
 
+//for console logs
+const green = (s) => `\x1b[32m${s}\x1b[0m`;
+const orange = (s) => `\x1b[33m${s}\x1b[0m`;
+const red = (s) => `\x1b[31m${s}\x1b[0m`;
+
 /**
  * Write to a file. Will create the file & destination folder if they don't exist
  * 
@@ -86,7 +91,7 @@ module.exports = (config = {}) => {
     const wordpressTestThreadDirs = fullConfig.singleThread ? [specsDir] : getDirectories(specsDir);
 
     if (!wordpressTestThreadDirs.length) {
-        console.error('CRITICAL ERROR: No test directories were found!');
+        console.error(red('CRITICAL ERROR: No test directories were found!'));
         process.exit(1);
     }
 
@@ -97,7 +102,7 @@ module.exports = (config = {}) => {
     }
 
     if (getFiles(specsDir).length) {
-        console.warn(`WARNING: One or more files have been placed at the root of ${specsDir}. All spec files must be in subdirectories, otherwise they will not get tested when run in multithreaded mode:\n${getFiles(specsDir).join('\n')}\n`);
+        console.warn(orange(`WARNING: One or more files have been placed at the root of ${specsDir}. All spec files must be in subdirectories, otherwise they will not get tested when run in multithreaded mode:\n${getFiles(specsDir).join('\n')}\n`));
     }
 
     // a basic CSV for recording how many seconds each thread took to run
@@ -129,7 +134,7 @@ module.exports = (config = {}) => {
             ]);
 
             const customWarning = (str) => {
-                console.warn(str);
+                console.warn(orange(str));
                 logs += `${str}\n`;
             }
 
@@ -227,7 +232,7 @@ module.exports = (config = {}) => {
                     if (!waitForFileExistRemainingTime) {
                         //TODO not the best solution, too bad!
                         thread2ExtraLog = `WARNING: There may be an issue as the ${file} file doesn\'t exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
-                        console.warn(thread2ExtraLog);
+                        console.warn(orange(thread2ExtraLog));
 
                         resolve();
                     }
@@ -635,11 +640,11 @@ module.exports = (config = {}) => {
                             .replace('</body>', cmrAllureFooter)
                     );
 
-                    console.log(`\x1b[32mThe allure report for this run has been bundled into a single HTML file: "${reportDir}allure-report/complete.html"`);
+                    console.log(green(`The allure report for this run has been bundled into a single HTML file: "${allureReportHtmlComplete}"`));
 
                     combinedAllureSuccessfully = true;
                 } catch (err) {
-                    console.log('Error when attempting to bundle the Allure report into a single file! You might not have pip installed. See the readme for more details.');
+                    console.log(red('Error when attempting to bundle the Allure report into a single file! You might not have pip installed. See the readme for more details.'));
                 }
             }
 
@@ -671,7 +676,7 @@ module.exports = (config = {}) => {
                 }
             }
 
-            console.log(`The Allure report for this run has been saved to the following directory: "${allureReportDir}"`);
+            console.log(green(`The Allure report for this run has been saved to the following directory: "${allureReportDir}"`));
         }
 
         if (fullConfig.waitForFileExist?.deleteAfterCompletion) {
