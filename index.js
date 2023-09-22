@@ -79,6 +79,8 @@ module.exports = (config = {}) => {
         });
     };
 
+    let thread2ExtraLog = '';
+
     let exitCode = 0;
 
     const wordpressTestThreadDirs = fullConfig.singleThread ? [specsDir] : getDirectories(specsDir);
@@ -223,7 +225,10 @@ module.exports = (config = {}) => {
                     waitForFileExistRemainingTime--;
 
                     if (!waitForFileExistRemainingTime) {
-                        console.warn(`WARNING: There may be an issue as the ${file} file doesn\'t exist after ${waitForFileExistTimeout} seconds... will continue anyway!`);//TODO save this log somewhere
+                        //TODO not the best solution, too bad!
+                        thread2ExtraLog = `WARNING: There may be an issue as the ${file} file doesn\'t exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
+                        console.warn(thread2ExtraLog);
+
                         resolve();
                     }
                 }
@@ -482,7 +487,10 @@ module.exports = (config = {}) => {
             ).forEach((file) => {
                 const threadNo = file.split('_')[1].split('.txt')[0];
 
-                threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">${fs.readFileSync(file).toString('utf8')}</pre></div>`;
+                threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">
+                ${threadNo === '2' && thread2ExtraLog //TODO improve this
+                        ? `${thread2ExtraLog}\n` : ''}
+                ${fs.readFileSync(file).toString('utf8')}</pre></div>`;
             });
 
             Object.values(threadsMeta).forEach(thread => {
@@ -662,6 +670,8 @@ module.exports = (config = {}) => {
                     runShellCommand(`open "${allureReportHtml}"`);
                 }
             }
+
+            console.log(`The Allure report for this run has been saved to the following directory: "${allureReportDir}"`);
         }
 
         if (fullConfig.waitForFileExist?.deleteAfterCompletion) {
