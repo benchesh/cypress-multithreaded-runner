@@ -319,7 +319,7 @@ module.exports = (config = {}) => {
                             }
                         }
 
-                        // files from all threads need to be in the same directory to construct the allure report
+                        // files from all threads need to be in the same directory to construct the Allure report
                         fs.moveSync(
                             file,
                             path.resolve(allureResultsPath, path.basename(file)),
@@ -423,8 +423,8 @@ module.exports = (config = {}) => {
             fs.writeFileSync(`${reportDir}thread-performance-report.txt`, reportText);
         }
 
-        // Overwrite the historyIds in the allure results, as the allure plugin's method is flawed.
-        // Doing this ensures tests across identical names are included in the report (see FAB-46674)
+        // Overwrite the historyIds in the Allure results, as the Allure plugin's method is flawed.
+        // Doing this ensures tests across identical names are included in the report
         // NOTE: Tests with identical names must be in different describe blocks and/or spec files
         getFiles(allureResultsPath).forEach((file) => {
             if (!file.endsWith('.json')) return;
@@ -440,7 +440,7 @@ module.exports = (config = {}) => {
             }
         });
 
-        // generate the allure report from the most recent run
+        // generate the Allure report from the most recent run
         runShellCommand('allure generate allure-results --clean -o allure-report');
 
         // make sure none of the tests failed!
@@ -639,7 +639,7 @@ module.exports = (config = {}) => {
 
                     combinedAllureSuccessfully = true;
                 } catch (err) {
-                    console.log('Error when attempting to bundle the allure report into a single file :( You might not have pip installed. See the readme for more details.');
+                    console.log('Error when attempting to bundle the Allure report into a single file! You might not have pip installed. See the readme for more details.');
                 }
             }
 
