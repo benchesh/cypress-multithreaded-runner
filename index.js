@@ -583,12 +583,12 @@ module.exports = (config = {}) => {
 
                 document.querySelector('#cmr-open-all').addEventListener('click', () => {
                     [...document.querySelectorAll('.cmr-pre-heading:not(.cmr-pre-heading-active)')].forEach((heading)=>{heading.click()});
-                    window.scrollTo(0,9999999999999);
+                    window.scrollTo(0,999999999);
                 });
 
                 document.querySelector('#cmr-close-all').addEventListener('click', () => {
                     [...document.querySelectorAll('.cmr-pre-heading-active')].forEach((heading)=>{heading.click()});
-                    window.scrollTo(0,9999999999999);
+                    window.scrollTo(0,999999999);
                 });
                 </script>
             </body>`;
