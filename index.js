@@ -343,8 +343,13 @@ module.exports = (config = {}) => {
                 wordpressTestThreadDirs.forEach((threadPath, index) => {
                     const threadId = testThreads.length > 9 ? String(index + 1).padStart(2, '0') : index + 1;
 
-                    threadsMeta[index + 1].heading = [`Thread #${threadId} [${threadPath}]`];
-                    str += `${threadsMeta[index + 1].heading[0]}\n`;
+                    const shortThreadPath = threadPath.length > 60
+                        ? `...${threadPath.substring(threadPath.length - 57).match(/\/(.*)$/)?.[0] || threadPath.substring(threadPath.length - 57)}`
+                        : threadPath;
+
+                    threadsMeta[index + 1].heading = [`Thread #${threadId} [${shortThreadPath}]`];
+
+                    str += `Thread #${threadId} [${threadPath}]\n`;
 
                     // if there's a very high number of threads, they're prone to ending early
                     if (threadsMeta[index + 1].errorType === 'critical' || !Object.entries(threadsMeta[index + 1].perfResults).length) {
@@ -511,6 +516,7 @@ module.exports = (config = {}) => {
 
             const cmrAllureFooter = `<div class="cmr-content cmr-footer">${allLogs
                 .replace(/Couldn't find tsconfig.json. tsconfig-paths will be skipped\n/g, '')// this warning is noisy, remove it
+                .replace(/tput: No value for \$TERM and no -T specified\n/g, '')// this warning is noisy, remove it
                 }<div class="cmr-report"><button id="cmr-open-all">Open all logs above</button><button id="cmr-close-all">Close all logs above</button><br><br><h2>Thread Performance Summary</h2><pre>${reportText}</pre></div></div>
             
                 <style>
