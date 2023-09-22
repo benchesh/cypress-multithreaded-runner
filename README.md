@@ -37,7 +37,7 @@ runner({
 });
 ```
 
-A thread will be created for every top-level directory within your tests directory (`specsDir`). For example, 8 top-level folders will be 8 threads. Each subsequent thread after the first will be started 5 seconds after the previous one.
+A thread will be created for every top-level directory within your tests directory (`specsDir`). For example, 8 top-level folders will be 8 threads. Each subsequent thread after the first will be started 10 seconds after the previous one.
 
 ### Guidance
 

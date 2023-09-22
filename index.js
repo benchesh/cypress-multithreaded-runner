@@ -240,16 +240,16 @@ module.exports = (config = {}) => {
 
             if (testThreads.length > 1) {
                 if (fullConfig.waitForFileExist?.filepath) {
-                    await delay(4000);
+                    await delay(9000);
                     await waitForFileExist(1000);
                 } else {
-                    await delay(5000);
+                    await delay(10000);
                 }
 
                 threadsArr.push(spawnThread(testThreads[1], 2));
 
                 for (const [index, thread] of testThreads.slice(2).entries()) {
-                    await delay(5000);
+                    await delay(10000);
                     threadsArr.push(spawnThread(thread, Number(index) + 3));
                 }
             }
