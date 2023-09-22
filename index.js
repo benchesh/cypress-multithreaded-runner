@@ -63,6 +63,10 @@ module.exports = (config = {}) => {
     const waitForFileExistTimeout = fullConfig.waitForFileExist?.timeout || 60;
     const threadTimeout = fullConfig.threadTimeout || 600;
 
+    const openAllure = fullConfig.openAllure || fullConfig.open || false;
+    const combineAllure = fullConfig.combineAllure || fullConfig.combine || false;
+    const hostAllure = fullConfig.hostAllure || fullConfig.host || false;
+
     const defaultAllureReportDir = path.resolve(reportDir, 'allure-report');
     const allureReportDir = fullConfig.allureReportDir ? path.resolve(fullConfig.allureReportDir) : defaultAllureReportDir;
 
@@ -464,10 +468,13 @@ module.exports = (config = {}) => {
             }
         }
 
-        const allureReportHtml = path.resolve(reportDir, 'allure-report', 'index.html');
-        const allureReportHtmlComplete = path.resolve(reportDir, 'allure-report', 'complete.html');
+        const defaultAllureReportHtml = path.resolve(defaultAllureReportDir, 'index.html');
+        const defaultAllureReportHtmlComplete = path.resolve(defaultAllureReportDir, 'complete.html');
 
-        if (fs.existsSync(allureReportHtml)) {
+        const allureReportHtml = path.resolve(allureReportDir, 'index.html');
+        const allureReportHtmlComplete = path.resolve(allureReportDir, 'complete.html');
+
+        if (fs.existsSync(defaultAllureReportHtml)) {
             let allLogs = '';
 
             getFiles(
@@ -600,37 +607,38 @@ module.exports = (config = {}) => {
             </body>`;
 
             fs.writeFileSync(
-                allureReportHtml,
-                fs.readFileSync(allureReportHtml)
+                defaultAllureReportHtml,
+                fs.readFileSync(defaultAllureReportHtml)
                     .toString('utf8')
                     .replace(/.*(googletagmanager|gtag|dataLayer|<script>|\n<\/script>).*/gm, '')// hack to remove some dodgy html that breaks allure-combine
             )
 
-            if (!fullConfig.skipAllureCombine) {
+            let combinedAllureSuccessfully = false;
+
+            if (combineAllure) {
                 try {
                     runShellCommand('pip install allure-combine && allure-combine allure-report');
 
                     fs.writeFileSync(
-                        allureReportHtmlComplete,
-                        fs.readFileSync(allureReportHtmlComplete)
+                        defaultAllureReportHtmlComplete,
+                        fs.readFileSync(defaultAllureReportHtmlComplete)
                             .toString('utf8')
                             .replace('<body>', cmrAllureBody)
                             .replace('</body>', cmrAllureFooter)
                     );
 
-                    if (fullConfig.openAllure) {
-                        runShellCommand(`open "${allureReportHtmlComplete}"`);
-                    }
-
                     console.log(`\x1b[32mThe allure report for this run has been bundled into a single HTML file: "${reportDir}allure-report/complete.html"`);
+
+                    combinedAllureSuccessfully = true;
                 } catch (err) {
-                    console.log('Error when attempting to bundle the allure report into a single file :( You might not have pip installed. You can skip this step with --skip-allure-combine. See the readme for more details.');
+                    console.log('Error when attempting to bundle the allure report into a single file :( You might not have pip installed. See the readme for more details.');
                 }
             }
 
+            // we add our custom elements into the HTML AFTER allure-combine because allure-combine will crash otherwise!
             fs.writeFileSync(
-                allureReportHtml,
-                fs.readFileSync(allureReportHtml)
+                defaultAllureReportHtml,
+                fs.readFileSync(defaultAllureReportHtml)
                     .toString('utf8')
                     .replace('<body>', cmrAllureBody)
                     .replace('</body>', cmrAllureFooter)
@@ -644,9 +652,15 @@ module.exports = (config = {}) => {
                 );
             }
 
-            // host the allure report as a localhost (useful if allure-combine doesn't work due to pip)
-            if (fullConfig.hostAllure) {
+            // host the allure report as a localhost
+            if (hostAllure) {
                 runShellCommand(`allure open "${allureReportDir}"`);
+            } else if (openAllure) {
+                if (combinedAllureSuccessfully) {
+                    runShellCommand(`open "${allureReportHtmlComplete}"`);
+                } else {
+                    runShellCommand(`open "${allureReportHtml}"`);
+                }
             }
         }
 
