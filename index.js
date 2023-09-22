@@ -224,14 +224,14 @@ module.exports = (config = {}) => {
             const file = fullConfig.waitForFileExist.filepath;
 
             return new Promise(resolve => setInterval(() => {
-                if (fs.existsSync(file)) {
+                if (fs.existsSync(file) && Buffer.byteLength(fs.readFileSync(file))) {// the file exists and is larger than 0 bytes!
                     resolve();
                 } else {
                     waitForFileExistRemainingTime--;
 
                     if (!waitForFileExistRemainingTime) {
                         //TODO not the best solution, too bad!
-                        thread2ExtraLog = `WARNING: There may be an issue as the ${file} file doesn\'t exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
+                        thread2ExtraLog = `WARNING: There may be an issue as the "${file}" file doesn't exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
                         console.warn(orange(thread2ExtraLog));
 
                         resolve();
@@ -492,10 +492,7 @@ module.exports = (config = {}) => {
             ).forEach((file) => {
                 const threadNo = file.split('_')[1].split('.txt')[0];
 
-                threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">
-                ${threadNo === '2' && thread2ExtraLog //TODO improve this
-                        ? `${thread2ExtraLog}\n` : ''}
-                ${fs.readFileSync(file).toString('utf8')}</pre></div>`;
+                threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">${threadNo === '2' && thread2ExtraLog ? `${thread2ExtraLog}\n` : ''}${fs.readFileSync(file).toString('utf8')}</pre></div>`;
             });
 
             Object.values(threadsMeta).forEach(thread => {
