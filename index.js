@@ -516,7 +516,7 @@ module.exports = (config = {}) => {
                 ${minorErrorThreads.length ? `
                 <div class="cmr-error">
                     ${criticalErrorThreads.length ? '' : '<h2>Cypress Multithreaded Runner</h2>'}
-                    ${minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${minorErrorThreads.length ? '' : '<br>Scroll down to read the full logs from the separate threads.'}
+                    ${minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${criticalErrorThreads.length ? '' : '<br>Scroll down to read the full logs from the separate threads.'}
                 </div>` : ''}
                 ${warnThreads.length ? `
                 <div class="cmr-warn">
