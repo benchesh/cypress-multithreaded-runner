@@ -66,6 +66,7 @@ module.exports = (config = {}) => {
     const specsDir = fullConfig.specsDir ? path.resolve(fullConfig.specsDir) : null;
     const maxThreadRestarts = fullConfig.maxThreadRestarts || 5;
     const waitForFileExistTimeout = fullConfig.waitForFileExist?.timeout || 60;
+    const waitForFileMinimumSize = fullConfig.waitForFileExist.minSize || 2;
     const threadTimeout = fullConfig.threadTimeout || 600;
 
     const openAllure = fullConfig.openAllure || fullConfig.open || false;
@@ -119,6 +120,9 @@ module.exports = (config = {}) => {
 
     console.log(`${testThreads.length} thread${testThreads.length !== 1 ? 's' : ''} will be created to test spec files in the following director${testThreads.length !== 1 ? 'ies' : 'y'}:\n${wordpressTestThreadDirs.join('\n')}\n`);
 
+    // needed if a Cypress instance doesn't log anything but the shellscript still wants to write to the report directory
+    if (!fs.existsSync(reportDir)) fs.mkdirSync(reportDir);
+
     (async () => {
         async function spawnThread(thread, threadNo, logs = '', restartAttempts = 0) {
             let restartTests = false;
@@ -163,6 +167,11 @@ module.exports = (config = {}) => {
                     || log.includes('Cypress could not associate this error to any specific test.')
                 ) {
                     restartTests = true;
+
+                    kill(cypressProcess.pid);
+                } else if (log.includes('no spec files were found')) {
+                    threadsMeta[threadNo].status = 'error';
+                    threadsMeta[threadNo].errorType = 'no-spec-files';
 
                     kill(cypressProcess.pid);
                 }
@@ -224,7 +233,7 @@ module.exports = (config = {}) => {
             const file = fullConfig.waitForFileExist.filepath;
 
             return new Promise(resolve => setInterval(() => {
-                if (fs.existsSync(file) && Buffer.byteLength(fs.readFileSync(file))) {// the file exists and is larger than 0 bytes!
+                if (fs.existsSync(file) && Buffer.byteLength(fs.readFileSync(file)) >= waitForFileMinimumSize) {// the file exists and has an acceptable filesize
                     resolve();
                 } else {
                     waitForFileExistRemainingTime--;
@@ -365,9 +374,19 @@ module.exports = (config = {}) => {
 
                     str += `Thread #${threadId} [${threadPath}]\n`;
 
+                    if (threadsMeta[index + 1].errorType === 'no-spec-files') {
+                        const err = 'ERROR: No spec files found!';
+                        threadsMeta[index + 1].heading.push(err);
+                        threadsMeta[index + 1].summary = `ERROR: No spec files were found for thread #${index + 1}`;
+                        str += `${err}\n\n`;
+                        exitCode = 1;
+                        return;
+                    }
+
                     // if there's a very high number of threads, they're prone to ending early
                     if (threadsMeta[index + 1].errorType === 'critical' || !Object.entries(threadsMeta[index + 1].perfResults).length) {
                         const err = 'CRITICAL ERROR: Thread did not complete!';
+                        threadsMeta[index + 1].errorType = 'critical';
                         threadsMeta[index + 1].heading.push(err);
                         str += `${err}\n\n`;
                         exitCode = 1;
