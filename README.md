@@ -34,10 +34,11 @@ runner({
     timeout: 60,
     deleteAfterCompletion: true,
   },
+  threadDelay: 10,
 });
 ```
 
-A thread will be created for every top-level directory within your tests directory (`specsDir`). For example, 8 top-level folders will be 8 threads. Each subsequent thread after the first will be started 10 seconds after the previous one.
+A thread will be created for every top-level directory within your tests directory (`specsDir`). For example, 8 top-level folders will be 8 threads. Each subsequent thread after the first will be started 10 seconds after the previous one (`threadDelay` can change this).
 
 ### Guidance
 
@@ -67,6 +68,7 @@ The module makes use of `argv` to allow options to be overriden via the command 
 | `host`              | boolean | false                       | Alias for `hostAllure`                                                                                                                                                                                                                                                          |
 | `waitForFileExist`  | object  | null                        | Wait for a specific file to exist (and larger than 0 bytes in size) before subsequent threads begin. For specific options, see table below.                                                                                                                                     |
 | `maxThreadRestarts` | number  | 5                           | Should an instance of Cypress crash, it may be restarted up to this many times until all threads complete successfully. Note that any spec file that fails in a `beforeEach` hook will be considered a crash. This behaviour may be amended in a future version of this module. |
+| `threadDelay`       | number  | 10                          | The amount of time in seconds to wait before starting the next thread                                                                                                                                                                                                           |
 
 ### cypressConfig
 

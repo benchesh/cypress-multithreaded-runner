@@ -68,6 +68,7 @@ module.exports = (config = {}) => {
     const waitForFileExistTimeout = fullConfig.waitForFileExist?.timeout || 60;
     const waitForFileMinimumSize = fullConfig.waitForFileExist.minSize || 2;
     const threadTimeout = fullConfig.threadTimeout || 600;
+    const threadDelay = (fullConfig.threadDelay || 10) * 1000;
 
     const openAllure = fullConfig.openAllure || fullConfig.open || false;
     const combineAllure = fullConfig.combineAllure || fullConfig.combine || false;
@@ -259,16 +260,16 @@ module.exports = (config = {}) => {
 
             if (testThreads.length > 1) {
                 if (fullConfig.waitForFileExist?.filepath) {
-                    await delay(9000);
+                    await delay(threadDelay - 1000 > 0 ? threadDelay - 1000 : 0);
                     await waitForFileExist(1000);
                 } else {
-                    await delay(10000);
+                    await delay(threadDelay);
                 }
 
                 threadsArr.push(spawnThread(testThreads[1], 2));
 
                 for (const [index, thread] of testThreads.slice(2).entries()) {
-                    await delay(10000);
+                    await delay(threadDelay);
                     threadsArr.push(spawnThread(thread, Number(index) + 3));
                 }
             }
