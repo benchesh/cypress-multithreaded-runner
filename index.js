@@ -146,9 +146,13 @@ module.exports = (config = {}) => {
             let inactivityTimer;
 
             const setInactivityTimer = () => {
+                if (!threadTimeout) return;
+
                 clearTimeout(inactivityTimer);
                 inactivityTimer = setTimeout(() => {
                     customWarning(`The Cypress instance in thread #${threadNo} hasn\'t responded for ${threadTimeout} seconds and will be considered a crash.`);
+
+                    restartTests = true;
 
                     kill(cypressProcess.pid);
                 }, threadTimeout * 1000);
