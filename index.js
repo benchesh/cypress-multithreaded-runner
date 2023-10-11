@@ -57,6 +57,21 @@ const arrToNaturalStr = (arr) => {
     return str;
 }
 
+let SuperTout = class {
+    #_tout;
+    #_callback;
+    setTimeout = (callback, time) => {
+        clearTimeout(this.#_tout);
+        this.#_tout = setTimeout(callback, time);
+        this.#_callback = callback;
+    };
+    clearTimeout = () => {
+        clearTimeout(this.#_tout);
+
+        if (this.#_callback) this.#_callback();
+    };
+};
+
 module.exports = (config = {}) => {
     const fullConfig = { ...config, ...argv };
 
@@ -68,7 +83,8 @@ module.exports = (config = {}) => {
     const waitForFileExistTimeout = fullConfig.waitForFileExist?.timeout || 60;
     const waitForFileMinimumSize = fullConfig.waitForFileExist.minSize || 2;
     const threadTimeout = fullConfig.threadTimeout || 600;
-    const threadDelay = (fullConfig.threadDelay || 10) * 1000;
+    const threadDelay = (fullConfig.threadDelay || 30) * 1000;
+    const alwaysWaitForThreadDelay = fullConfig.alwaysWaitForThreadDelay || false;
 
     const openAllure = fullConfig.openAllure || fullConfig.open || false;
     const combineAllure = fullConfig.combineAllure || fullConfig.combine || false;
@@ -124,8 +140,10 @@ module.exports = (config = {}) => {
     // needed if a Cypress instance doesn't log anything but the shellscript still wants to write to the report directory
     mkdirSyncIfMissing(reportDir);
 
+    const threadDelayTout = (new SuperTout);
+
     (async () => {
-        async function spawnThread(thread, threadNo, logs = '', restartAttempts = 0) {
+        async function spawnThread(thread, threadNo, logs = '', restartAttempts = 0, threadStarted = false) {
             let restartTests = false;
 
             const cypressProcess = spawn('bash', [
@@ -179,6 +197,10 @@ module.exports = (config = {}) => {
                     threadsMeta[threadNo].errorType = 'no-spec-files';
 
                     kill(cypressProcess.pid);
+                } else if (!threadStarted && log.includes('(Run Starting)') && !alwaysWaitForThreadDelay) {
+                    threadStarted = true;
+
+                    threadDelayTout.clearTimeout();
                 }
             };
 
@@ -211,7 +233,7 @@ module.exports = (config = {}) => {
                                     fs.rmSync(path.join(allureResultsPath, String(threadNo)), { recursive: true, force: true });
                                 }
 
-                                await spawnThread(thread, threadNo, logs, restartAttempts);
+                                await spawnThread(thread, threadNo, logs, restartAttempts, threadStarted);
                             } else {
                                 threadsMeta[threadNo].status = 'error';
                                 threadsMeta[threadNo].errorType = 'critical';
@@ -255,7 +277,7 @@ module.exports = (config = {}) => {
         }
 
         const delay = (ms) => {
-            return new Promise(resolve => setTimeout(resolve, ms));
+            return new Promise(resolve => threadDelayTout.setTimeout(resolve, ms));
         }
 
         async function runCypressTests() {
