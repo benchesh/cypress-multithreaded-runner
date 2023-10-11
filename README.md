@@ -26,6 +26,8 @@ runner({
     filepath: "src/cypress/configurations/my-generic-cypress.config.js",
     object: cypressConfigOverride,
   },
+  grep: "my-test",
+  grepTags: "my-tag",
   allureReportDir: "i-would-rather-save-the-allure-report-here",
   reportDir: cypressConfigOverride.reportDir,
   specsDir: "src/cypress/tests",
@@ -71,6 +73,9 @@ The module makes use of `argv` to allow options to be overriden via the command 
 | `threadDelay`              | number  | 30                          | The amount seconds to wait before starting the next thread, unless the current Cypress instance has already started running                                                                                                                                                     |
 | `alwaysWaitForThreadDelay` | boolean | false                       | Always wait for the total `threadDelay` time to elapse before starting the next thread, even if the current Cypress instance has started running                                                                                                                                |
 | `threadTimeout`            | number  | 600                         | The maximum amount of seconds to wait for a thread to respond before it's considered a crash. Every time any thread logs something, the timeout will be reset. Set to 0 to have no timeout at all.                                                                              |
+| `grep`                     | string  | null                        | `grep` arg to be passed through to each Cypress instance. See [here](https://www.npmjs.com/package/@cypress/grep) for more information.                                                                                                                                         |
+| `grepTags`                 | string  | null                        | `grepTags` arg to be passed through to each Cypress instance. See [here](https://www.npmjs.com/package/@cypress/grep) for more information.                                                                                                                                     |
+| `passthroughEnvArgs`       | string  | null                        | Additional Cypress environment arguments to be passed through to each Cypress instance. No preprocessing will be done to this string.                                                                                                                                           |
 
 ### cypressConfig
 

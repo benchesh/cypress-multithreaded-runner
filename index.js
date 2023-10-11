@@ -86,6 +86,16 @@ module.exports = (config = {}) => {
     const threadDelay = (fullConfig.threadDelay || 30) * 1000;
     const alwaysWaitForThreadDelay = fullConfig.alwaysWaitForThreadDelay || false;
 
+    const additionalCypressEnvArgs = (() => {
+        const grepTags = fullConfig.grepTags ? `grepTags="${fullConfig.grepTags}"` : '';
+        const grep = fullConfig.grep ? `grep="${fullConfig.grep}"` : '';
+        const passthroughEnvArgs = fullConfig.passthroughEnvArgs || '';
+
+        if (!grepTags && !grep && !passthroughEnvArgs) return '';
+
+        return `,${[grepTags, grep, passthroughEnvArgs].filter(str => str).join(',')}`
+    })();
+
     const openAllure = fullConfig.openAllure || fullConfig.open || false;
     const combineAllure = fullConfig.combineAllure || fullConfig.combine || false;
     const hostAllure = fullConfig.hostAllure || fullConfig.host || false;
@@ -154,6 +164,7 @@ module.exports = (config = {}) => {
                 cypressConfigFilepath || '',// $3
                 thread,// $4
                 threadNo,// $5
+                additionalCypressEnvArgs,// $6
             ]);
 
             const customWarning = (str) => {
