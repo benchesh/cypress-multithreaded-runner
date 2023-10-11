@@ -110,7 +110,7 @@ module.exports = (config = {}) => {
     // a basic CSV for recording how many seconds each thread took to run
     const threadPerformanceFilepath = path.join(reportDir, 'thread-performance.csv');
 
-    // raw test results are saved to this directory, which are then used to create the allure report
+    // raw test results are saved to this directory, which are then used to create the Allure report
     const allureResultsPath = path.join(reportDir, 'allure-results');
 
     // add a custom config to every thread to pass into the shell script
@@ -662,7 +662,7 @@ module.exports = (config = {}) => {
                             .replace('</body>', cmrAllureFooter)
                     );
 
-                    console.log(green(`The allure report for this run has been bundled into a single HTML file: "${allureReportHtmlComplete}"`));
+                    console.log(green(`The Allure report for this run has been bundled into a single HTML file: "${allureReportHtmlComplete}"`));
 
                     combinedAllureSuccessfully = true;
                 } catch (err) {
@@ -687,7 +687,7 @@ module.exports = (config = {}) => {
                 );
             }
 
-            // host the allure report as a localhost
+            // host the Allure report as a localhost
             if (hostAllure) {
                 runShellCommand(`allure open "${allureReportDir}"`);
             } else if (openAllure) {
