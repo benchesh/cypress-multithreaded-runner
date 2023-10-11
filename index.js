@@ -122,7 +122,7 @@ module.exports = (config = {}) => {
     console.log(`${testThreads.length} thread${testThreads.length !== 1 ? 's' : ''} will be created to test spec files in the following director${testThreads.length !== 1 ? 'ies' : 'y'}:\n${wordpressTestThreadDirs.join('\n')}\n`);
 
     // needed if a Cypress instance doesn't log anything but the shellscript still wants to write to the report directory
-    if (!fs.existsSync(reportDir)) fs.mkdirSync(reportDir);
+    mkdirSyncIfMissing(reportDir);
 
     (async () => {
         async function spawnThread(thread, threadNo, logs = '', restartAttempts = 0) {
@@ -450,7 +450,7 @@ module.exports = (config = {}) => {
             console.log(`\n\n${reportText}\n\n`);
 
             // save these logs for future reference!
-            fs.writeFileSync(`${reportDir}thread-performance-report.txt`, reportText);
+            fs.writeFileSync(path.resolve(reportDir, 'thread-performance-report.txt'), reportText);
         }
 
         // Overwrite the historyIds in the Allure results, as the Allure plugin's method is flawed.
