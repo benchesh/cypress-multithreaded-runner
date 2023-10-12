@@ -75,6 +75,10 @@ let SuperTout = class {
 module.exports = (config = {}) => {
     const fullConfig = { ...config, ...argv };
 
+    (fullConfig.ignoreCliOverrides || []).forEach(prop => {
+        fullConfig[prop] = config[prop];
+    });
+
     const cypressConfigFilepath = fullConfig.cypressConfig?.filepath ? path.resolve(fullConfig.cypressConfig.filepath) : null;
     const cypressConfigObject = fullConfig.cypressConfig?.object;
     const reportDir = fullConfig.reportDir ? path.join(fullConfig.reportDir) : null;
