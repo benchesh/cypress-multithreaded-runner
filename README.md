@@ -6,9 +6,10 @@ Out of the box, Cypress will only run your spec files in a single thread. It als
 
 ## Dependencies
 
-- node 18 or above
-- A Cypress project (tested on version `12.10`)
-- pip (optional: only needed if you wish to combine the Allure report into a single file)
+- [node 18 or above](https://nodejs.org/en/download)
+- A [Cypress](https://www.npmjs.com/package/cypress) project (tested on version `12.10`)
+- [pip](https://pypi.org/project/pip/) (optional: only needed if you wish to combine the Allure report into a single file)
+- [@cypress/grep](https://www.npmjs.com/package/@cypress/grep) (optional: only needed if you want to use Cypress grep features)
 
 ## Setup
 
@@ -58,7 +59,7 @@ The module makes use of `argv` to allow options to be overriden via the command 
 
 | Name                       | Type    | Default value               | Description                                                                                                                                                                                                                                                                     |
 | -------------------------- | ------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cypressConfig`            | object  | null                        | The config that'll be passed through to every Cypress instance. For specific options, see table below.                                                                                                                                                                          |
+| `cypressConfig`            | object  | null                        | The config that'll be passed through to every Cypress instance. For specific options, see [table below](#cypressconfig).                                                                                                                                                                          |
 | `reportDir`                | string  | null                        | The location to save the full report to                                                                                                                                                                                                                                         |
 | `allureReportDir`          | string  | `<reportDir>/allure-report` | A different location to save the Allure report, specifically                                                                                                                                                                                                                    |
 | `specsDir`                 | string  | null                        | The top-level directory containing all Cypress spec files are                                                                                                                                                                                                                   |
@@ -68,7 +69,8 @@ The module makes use of `argv` to allow options to be overriden via the command 
 | `combine`                  | boolean | false                       | Alias for `combineAllure`                                                                                                                                                                                                                                                       |
 | `hostAllure`               | boolean | false                       | Spin up a localhost for the Allure report after it's generated                                                                                                                                                                                                                  |
 | `host`                     | boolean | false                       | Alias for `hostAllure`                                                                                                                                                                                                                                                          |
-| `waitForFileExist`         | object  | null                        | Wait for a specific file to exist (and larger than 0 bytes in size) before subsequent threads begin. For specific options, see table below.                                                                                                                                     |
+|`ignoreCliOverrides`| arrayOf(string) | null| A list of keys of properties that you don't want the CLI to override when you run an instance of cypress-multithreaded-runner. This will enable your node app to do a custom override of that uses a combination of the CLI and itself. See [here](#ignoreclioverrides-example) for an example|
+| `waitForFileExist`         | object  | null                        | Wait for a specific file to exist (and larger than 0 bytes in size) before subsequent threads begin. For specific options, see [table below](#waitforfileexist).                                                                                                                                     |
 | `maxThreadRestarts`        | number  | 5                           | Should an instance of Cypress crash, it may be restarted up to this many times until all threads complete successfully. Note that any spec file that fails in a `beforeEach` hook will be considered a crash. This behaviour may be amended in a future version of this module. |
 | `threadDelay`              | number  | 30                          | The amount seconds to wait before starting the next thread, unless the current Cypress instance has already started running                                                                                                                                                     |
 | `alwaysWaitForThreadDelay` | boolean | false                       | Always wait for the total `threadDelay` time to elapse before starting the next thread, even if the current Cypress instance has started running                                                                                                                                |
@@ -92,3 +94,55 @@ The module makes use of `argv` to allow options to be overriden via the command 
 | `minSize`               | number  | 2             | The minimum acceptable size (in bytes) for the file. Default is therefore 2 bytes. A null file will be 0 bytes.<br>If the file exists but has a size smaller than this value, it'll be treated as if it doesn't exist. |
 | `timeout`               | number  | 60            | The maximum amount of seconds to wait for the file to exist. The threads will begin when the time elapses, regardless of whether the file exists or not.                                                               |
 | `deleteAfterCompletion` | boolean | false         | Delete the file once all threads have completed                                                                                                                                                                        |
+
+### ignoreCliOverrides example
+
+Let's say in your node app, you want your instance of cypress-multithreaded-runner to always include a specific tag for `grepTags` (`@tag1`), like so:
+
+```javascript
+const runner = require("cypress-multithreaded-runner");
+
+const cypressConfigOverride = {
+  reportDir: "put-the-reports-here",
+};
+
+runner({
+  cypressConfig: {
+    filepath: "src/cypress/configurations/my-generic-cypress.config.js",
+    object: cypressConfigOverride,
+  },
+  reportDir: cypressConfigOverride.reportDir,
+  specsDir: "src/cypress/tests",
+  grepTags: "@tag1",
+});
+```
+
+However, if you then run your app in the command line with argument `--grepTags="@tag2"`, the `grepTags` value will be set to `@tag2` instead. By making use of `ignoreCliOverrides` (as well as [yargs](https://www.npmjs.com/package/yargs)) you can write your own function to combine both of these values for `grepTags`:
+
+```javascript
+const runner = require("cypress-multithreaded-runner");
+
+const yargs = require('yargs/yargs');
+const { hideBin } = require('yargs/helpers');
+
+const { argv } = yargs(hideBin(process.argv));
+
+const grepTags = [argv.grepTags, '@tag1'].filter((str) => str).join(' ');
+
+const cypressConfigOverride = {
+  reportDir: "put-the-reports-here",
+};
+
+runner({
+  cypressConfig: {
+    filepath: "src/cypress/configurations/my-generic-cypress.config.js",
+    object: cypressConfigOverride,
+  },
+  reportDir: cypressConfigOverride.reportDir,
+  specsDir: "src/cypress/tests",
+  grepTags,
+  ignoreCliOverrides: ['grepTags'],
+});
+```
+
+As you've now instructed cypress-multithreaded-runner to not overwrite the `grepTags` value with the command line argument, the above code would make the `grepTags` value equal to `@tag2 @tag1` when you run your app with the argument `--grepTags="@tag2"`.
