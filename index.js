@@ -89,6 +89,7 @@ module.exports = (config = {}) => {
     const threadTimeout = fullConfig.threadTimeout || 600;
     const threadDelay = (fullConfig.threadDelay || 30) * 1000;
     const alwaysWaitForThreadDelay = fullConfig.alwaysWaitForThreadDelay || false;
+    const logMode = fullConfig.logMode || 1;
 
     const additionalCypressEnvArgs = (() => {
         const grepTags = fullConfig.grepTags ? `grepTags="${fullConfig.grepTags}"` : '';
@@ -130,7 +131,7 @@ module.exports = (config = {}) => {
     const threadsMeta = {};
 
     for (i in wordpressTestThreadDirs) {
-        threadsMeta[Number(i) + 1] = { status: 'success', retries: 0, perfResults: {} }
+        threadsMeta[Number(i) + 1] = { threadNo: Number(i) + 1, status: 'success', retries: 0, perfResults: {}, logs: '', printedLogs: false }
     }
 
     if (getFiles(specsDir).length) {
@@ -195,6 +196,19 @@ module.exports = (config = {}) => {
 
             // detect known internal errors and restart the tests when they occur!
             const logCheck = async (log) => {
+                threadsMeta[threadNo].logs += log;
+
+                if (logMode > 2) {
+                    process.stdout.write(log);
+                } else {
+                    if (threadsMeta[threadNo].printedLogs) {
+                        process.stdout.write(log);
+                    } else if (!Object.values(threadsMeta).some(thread => thread.printedLogs === 'some' || thread.printedLogs === 'queue')) {
+                        threadsMeta[threadNo].printedLogs = 'some';
+                        process.stdout.write(log);
+                    }
+                }
+
                 setInactivityTimer();
 
                 logs += log;
@@ -219,15 +233,37 @@ module.exports = (config = {}) => {
                 }
             };
 
-            cypressProcess.stdout.on('data', (data) => {
-                process.stdout.write(data);
-                logCheck(data.toString());
-            });
+            cypressProcess.stdout.on('data', (data) => logCheck(data.toString()));
+            cypressProcess.stderr.on('data', (data) => logCheck(data.toString()));
 
-            cypressProcess.stderr.on('data', (data) => {
-                process.stderr.write(data);
-                logCheck(data.toString());
-            });
+            const printAllLogs = () => {
+                if (logMode > 2) {
+                    return;
+                }
+
+                if (threadsMeta[threadNo].printedLogs) {
+                    threadsMeta[threadNo].printedLogs = 'all';
+
+                    const queue = Object.values(threadsMeta).filter(thread => thread.printedLogs === 'queue');
+                    const nextThreadToLog = Object.values(threadsMeta).find(thread => !thread.printedLogs);
+
+                    for (let index = 0; index < queue.length; index++) {
+                        if (logMode === 1 && queue[index].threadNo > nextThreadToLog?.threadNo) {//leave queued to maintain chronology
+                            break;
+                        } else {
+                            threadsMeta[queue[index].threadNo].printedLogs = 'all';
+                            process.stdout.write(queue[index].logs);
+                        }
+                    }
+
+                    if (nextThreadToLog) {
+                        threadsMeta[nextThreadToLog.threadNo].printedLogs = 'some';
+                        process.stdout.write(nextThreadToLog.logs);
+                    }
+                } else {
+                    threadsMeta[threadNo].printedLogs = 'queue';
+                }
+            }
 
             return new Promise((resolve) => {
                 cypressProcess.on('close', async () => {
@@ -252,6 +288,7 @@ module.exports = (config = {}) => {
                             } else {
                                 threadsMeta[threadNo].status = 'error';
                                 threadsMeta[threadNo].errorType = 'critical';
+                                printAllLogs();
 
                                 customWarning(`CRITICAL ERROR: Too many internal Cypress errors in thread #${threadNo}. Giving up after ${maxThreadRestarts} attempts!`);
 
@@ -264,6 +301,7 @@ module.exports = (config = {}) => {
                         }, 1000);
                     } else {
                         writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
+                        printAllLogs();
                         resolve();
                     }
                 });
@@ -319,6 +357,12 @@ module.exports = (config = {}) => {
         }
 
         await runCypressTests();
+
+        if (logMode === 4) {
+            Object.values(threadsMeta).forEach(thread => {
+                process.stdout.write(thread.logs);
+            })
+        }
 
         console.log('All Cypress testing threads have ended.');
 
