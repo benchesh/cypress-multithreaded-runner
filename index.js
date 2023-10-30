@@ -218,6 +218,7 @@ module.exports = (config = {}) => {
                     log.includes('uncaught error was detected outside of a test')
                     || log.includes('we are skipping the remaining tests in the current suite')
                     || log.includes('Cypress could not associate this error to any specific test.')
+                    || log.includes('Cypress: Fatal IO error')
                 ) {
                     restartTests = true;
 
