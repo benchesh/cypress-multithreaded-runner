@@ -83,12 +83,13 @@ module.exports = (config = {}) => {
     const cypressConfigObject = fullConfig.cypressConfig?.object;
     const reportDir = fullConfig.reportDir ? path.join(fullConfig.reportDir) : null;
     const specsDir = fullConfig.specsDir ? path.resolve(fullConfig.specsDir) : null;
-    const maxThreadRestarts = fullConfig.maxThreadRestarts || 5;
-    const waitForFileExistTimeout = fullConfig.waitForFileExist?.timeout || 60;
-    const waitForFileMinimumSize = fullConfig.waitForFileExist.minSize || 2;
-    const threadTimeout = fullConfig.threadTimeout || 600;
-    const threadDelay = (fullConfig.threadDelay || 30) * 1000;
-    const alwaysWaitForThreadDelay = fullConfig.alwaysWaitForThreadDelay || false;
+    const maxThreadRestarts = fullConfig.maxThreadRestarts ?? 5;
+    const waitForFileExistTimeout = fullConfig.waitForFileExist?.timeout ?? 60;
+    const waitForFileMinimumSize = fullConfig.waitForFileExist?.minSize ?? 2;
+    const waitForFileExistFilepath = fullConfig.waitForFileExist?.filepath;
+    const threadTimeout = fullConfig.threadTimeout ?? 600;
+    const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
+    const alwaysWaitForThreadDelay = fullConfig.alwaysWaitForThreadDelay ?? false;
     const logMode = fullConfig.logMode || 1;
 
     const additionalCypressEnvArgs = (() => {
@@ -310,17 +311,19 @@ module.exports = (config = {}) => {
 
         const waitForFileExist = (ms) => {
             let waitForFileExistRemainingTime = waitForFileExistTimeout;
-            const file = fullConfig.waitForFileExist.filepath;
 
             return new Promise(resolve => setInterval(() => {
-                if (fs.existsSync(file) && Buffer.byteLength(fs.readFileSync(file)) >= waitForFileMinimumSize) {// the file exists and has an acceptable filesize
+                if (
+                    fs.existsSync(waitForFileExistFilepath)
+                    && Buffer.byteLength(fs.readFileSync(waitForFileExistFilepath)) >= waitForFileMinimumSize
+                ) {// the file exists and has an acceptable filesize
                     resolve();
                 } else {
                     waitForFileExistRemainingTime--;
 
                     if (!waitForFileExistRemainingTime) {
                         //TODO not the best solution, too bad!
-                        thread2ExtraLog = `WARNING: There may be an issue as the "${file}" file doesn't exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
+                        thread2ExtraLog = `WARNING: There may be an issue as the "${waitForFileExistFilepath}" file doesn't exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
                         console.warn(orange(thread2ExtraLog));
 
                         resolve();
@@ -338,7 +341,7 @@ module.exports = (config = {}) => {
             threadsArr.push(spawnThread(testThreads[0], 1));
 
             if (testThreads.length > 1) {
-                if (fullConfig.waitForFileExist?.filepath) {
+                if (waitForFileExistFilepath) {
                     await delay(threadDelay - 1000 > 0 ? threadDelay - 1000 : 0);
                     await waitForFileExist(1000);
                 } else {
@@ -783,8 +786,8 @@ module.exports = (config = {}) => {
         }
 
         if (fullConfig.waitForFileExist?.deleteAfterCompletion) {
-            if (fs.existsSync(fullConfig.waitForFileExist.filepath)) {
-                fs.unlinkSync(fullConfig.waitForFileExist.filepath);
+            if (fs.existsSync(waitForFileExistFilepath)) {
+                fs.unlinkSync(waitForFileExistFilepath);
             }
         }
 
