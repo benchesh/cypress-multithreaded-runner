@@ -96,11 +96,12 @@ module.exports = (config = {}) => {
     const additionalCypressEnvArgs = (() => {
         const grepTags = fullConfig.grepTags ? `grepTags="${fullConfig.grepTags}"` : '';
         const grep = fullConfig.grep ? `grep="${fullConfig.grep}"` : '';
+        const grepUntagged = fullConfig.grepUntagged ? `grepUntagged="${fullConfig.grepUntagged}"` : '';
         const passthroughEnvArgs = fullConfig.passthroughEnvArgs || '';
 
-        if (!grepTags && !grep && !passthroughEnvArgs) return '';
+        if (!grepTags && !grep && !grepUntagged && !passthroughEnvArgs) return '';
 
-        return `,${[grepTags, grep, passthroughEnvArgs].filter(str => str).join(',')}`
+        return `,${[grepTags, grep, grepUntagged, passthroughEnvArgs].filter(str => str).join(',')}`
     })();
 
     const openAllure = fullConfig.openAllure || fullConfig.open || false;
