@@ -87,6 +87,7 @@ module.exports = (config = {}) => {
     const waitForFileExistTimeout = fullConfig.waitForFileExist?.timeout ?? 60;
     const waitForFileMinimumSize = fullConfig.waitForFileExist?.minSize ?? 2;
     const waitForFileExistFilepath = fullConfig.waitForFileExist?.filepath;
+    const stopWaitingForFileWhenFirstThreadCompletes = fullConfig.waitForFileExist?.stopWaitingWhenFirstThreadCompletes ?? true;
     const threadTimeout = fullConfig.threadTimeout ?? 600;
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
     const alwaysWaitForThreadDelay = fullConfig.alwaysWaitForThreadDelay ?? false;
@@ -132,7 +133,14 @@ module.exports = (config = {}) => {
     const threadsMeta = {};
 
     for (i in wordpressTestThreadDirs) {
-        threadsMeta[Number(i) + 1] = { threadNo: Number(i) + 1, status: 'success', retries: 0, perfResults: {}, logs: '', printedLogs: false }
+        threadsMeta[Number(i) + 1] = {
+            threadNo: Number(i) + 1,
+            status: 'success',
+            retries: 0,
+            perfResults: {},
+            logs: '',
+            printedLogs: false,
+        }
     }
 
     if (getFiles(specsDir).length) {
@@ -296,6 +304,8 @@ module.exports = (config = {}) => {
 
                                 writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
 
+                                threadsMeta[threadNo].complete = true;
+
                                 exitCode = 1;
                             }
 
@@ -304,35 +314,52 @@ module.exports = (config = {}) => {
                     } else {
                         writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
                         printAllLogs();
+                        threadsMeta[threadNo].complete = true;
                         resolve();
                     }
                 });
             });
         }
 
-        const waitForFileExist = (ms) => {
+        const waitForFileExist = () => {
             let waitForFileExistRemainingTime = waitForFileExistTimeout;
 
-            return new Promise(resolve => setInterval(() => {
-                if (
-                    fs.existsSync(waitForFileExistFilepath)
-                    && Buffer.byteLength(fs.readFileSync(waitForFileExistFilepath)) >= waitForFileMinimumSize
-                ) {// the file exists and has an acceptable filesize
-                    resolve();
-                } else {
-                    waitForFileExistRemainingTime--;
-
-                    if (!waitForFileExistRemainingTime) {
+            return new Promise(resolve => {
+                const interv = setInterval(() => {
+                    if (
+                        fs.existsSync(waitForFileExistFilepath)
+                        && Buffer.byteLength(fs.readFileSync(waitForFileExistFilepath)) >= waitForFileMinimumSize
+                    ) {// the file exists and has an acceptable filesize
+                        clearInterval(interv);
+                        resolve();
+                    } else if (
+                        stopWaitingForFileWhenFirstThreadCompletes
+                        && Object.values(threadsMeta).find(thread => thread.complete)
+                    ) {
                         //TODO not the best solution, too bad!
-                        thread2ExtraLog = `WARNING: There may be an issue as the "${waitForFileExistFilepath}" file doesn't exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
+                        thread2ExtraLog = `WARNING: There may be an issue as the first thread has completed but the "${waitForFileExistFilepath}" file doesn't exist... will continue anyway!`;
                         console.warn(orange(thread2ExtraLog));
 
+                        clearInterval(interv);
                         resolve();
+                    } else {
+                        waitForFileExistRemainingTime--;
+
+                        if (!waitForFileExistRemainingTime) {
+                            //TODO not the best solution, too bad!
+                            thread2ExtraLog = `WARNING: There may be an issue as the "${waitForFileExistFilepath}" file doesn't exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
+                            console.warn(orange(thread2ExtraLog));
+
+                            clearInterval(interv);
+                            resolve();
+                        }
                     }
-                }
-            }, ms));
+                }, 1000);
+            });
         }
 
+        // the maximum delay before starting the next thread
+        // the delay will be interrupted as soon as the current Cypress has started running, unless alwaysWaitForThreadDelay is true
         const delay = (ms) => {
             return new Promise(resolve => threadDelayTout.setTimeout(resolve, ms));
         }
@@ -343,8 +370,10 @@ module.exports = (config = {}) => {
 
             if (testThreads.length > 1) {
                 if (waitForFileExistFilepath) {
+                    // decrease total delay by 1s as waitForFileExist will check for the file in intervals of 1s
                     await delay(threadDelay - 1000 > 0 ? threadDelay - 1000 : 0);
-                    await waitForFileExist(1000);
+                    
+                    await waitForFileExist();
                 } else {
                     await delay(threadDelay);
                 }
