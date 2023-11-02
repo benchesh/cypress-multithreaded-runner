@@ -344,9 +344,9 @@ module.exports = (config = {}) => {
                         clearInterval(interv);
                         resolve();
                     } else {
-                        waitForFileExistRemainingTime--;
+                        waitForFileExistRemainingTime -= 0.5;
 
-                        if (!waitForFileExistRemainingTime) {
+                        if (waitForFileExistRemainingTime <= 0) {
                             //TODO not the best solution, too bad!
                             thread2ExtraLog = `WARNING: There may be an issue as the "${waitForFileExistFilepath}" file doesn't exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
                             console.warn(orange(thread2ExtraLog));
@@ -355,7 +355,7 @@ module.exports = (config = {}) => {
                             resolve();
                         }
                     }
-                }, 1000);
+                }, 500);
             });
         }
 
@@ -371,9 +371,9 @@ module.exports = (config = {}) => {
 
             if (testThreads.length > 1) {
                 if (waitForFileExistFilepath) {
-                    // decrease total delay by 1s as waitForFileExist will check for the file in intervals of 1s
-                    await delay(threadDelay - 1000 > 0 ? threadDelay - 1000 : 0);
-                    
+                    // decrease total delay by .5s as waitForFileExist will check for the file in intervals of .5s
+                    await delay(threadDelay - 500 > 0 ? threadDelay - 500 : 0);
+
                     await waitForFileExist();
                 } else {
                     await delay(threadDelay);
