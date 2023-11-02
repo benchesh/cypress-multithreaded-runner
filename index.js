@@ -10,7 +10,18 @@ const kill = require('tree-kill');
 
 const path = require('path');
 
-const { argv } = yargs(hideBin(process.argv));
+const { argv } = yargs(hideBin(process.argv))
+    .array(['onlyRunSpecFilesIncludingAnyText', 'onlyRunSpecFilesIncludingAllText', 'ignoreCliOverrides'])
+    .choices('logMode', [1, 2, 3, 4])
+    .number(['maxThreadRestarts', 'threadDelay', 'threadTimeout',
+        'waitForFileExist.minSize', 'waitForFileExist.timeout',
+    ])
+    .boolean(['openAllure', 'combineAllure', 'hostAllure', 'alwaysWaitForThreadDelay',
+        'waitForFileExist.deleteAfterCompletion', 'waitForFileExist.stopWaitingWhenFirstThreadCompletes',
+    ])
+    .alias('open', 'openAllure')
+    .alias('combine', 'combineAllure')
+    .alias('host', 'hostAllure')
 
 /**
  * Recursively create a path if it doesn't exist
@@ -57,6 +68,32 @@ const arrToNaturalStr = (arr) => {
     return str;
 }
 
+const strArrayTransformer = (data) => {
+    if (!data) return null;
+
+    if (typeof data === 'string') {
+        return [data]
+    }
+
+    data = data.filter(str => str);
+
+    if (String(data)) return data
+
+    return null
+}
+
+const getFilesRecursive = (srcpath, arrayOfFiles = []) => {
+    fs.readdirSync(srcpath).forEach(function (file) {
+        if (fs.statSync(path.join(srcpath, file)).isDirectory()) {
+            arrayOfFiles = getFilesRecursive(path.join(srcpath, file), arrayOfFiles)
+        } else {
+            arrayOfFiles.push(path.resolve(srcpath, file))
+        }
+    })
+
+    return arrayOfFiles;
+}
+
 let SuperTout = class {
     #_tout;
     #_callback;
@@ -92,6 +129,9 @@ module.exports = (config = {}) => {
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
     const alwaysWaitForThreadDelay = fullConfig.alwaysWaitForThreadDelay ?? false;
     const logMode = fullConfig.logMode || 1;
+
+    const onlyRunSpecFilesIncludingAnyText = strArrayTransformer(fullConfig.onlyRunSpecFilesIncludingAnyText);
+    const onlyRunSpecFilesIncludingAllText = strArrayTransformer(fullConfig.onlyRunSpecFilesIncludingAllText);
 
     const additionalCypressEnvArgs = (() => {
         const grepTags = fullConfig.grepTags ? `grepTags="${fullConfig.grepTags}"` : '';
@@ -157,10 +197,24 @@ module.exports = (config = {}) => {
     // add a custom config to every thread to pass into the shell script
     const testThreads = wordpressTestThreadDirs.map((dir) => JSON.stringify({
         ...cypressConfigObject,
-        specPattern: dir,
+        specPattern: onlyRunSpecFilesIncludingAnyText || onlyRunSpecFilesIncludingAllText
+            ? getFilesRecursive(dir).filter(file => {
+                const fileStr = fs.readFileSync(file).toString('utf8');
+                return (onlyRunSpecFilesIncludingAnyText || ['']).some(text => fileStr.includes(text))
+                    && (onlyRunSpecFilesIncludingAllText || ['']).every(text => fileStr.includes(text))
+            })
+            : dir,
     }));
 
     console.log(`${testThreads.length} thread${testThreads.length !== 1 ? 's' : ''} will be created to test spec files in the following director${testThreads.length !== 1 ? 'ies' : 'y'}:\n${wordpressTestThreadDirs.join('\n')}\n`);
+
+    if (onlyRunSpecFilesIncludingAnyText) {
+        console.log(`NOTE: onlyRunSpecFilesIncludingAnyText is set to ["${onlyRunSpecFilesIncludingAnyText.join(', "')}"]. Therefore, only spec files that contain any text values from this array will run.`)
+    }
+
+    if (onlyRunSpecFilesIncludingAllText) {
+        console.log(`NOTE: onlyRunSpecFilesIncludingAllText is set to ["${onlyRunSpecFilesIncludingAllText.join(', "')}"]. Therefore, only spec files that contain any text values from this array will run.`)
+    }
 
     // needed if a Cypress instance doesn't log anything but the shellscript still wants to write to the report directory
     mkdirSyncIfMissing(reportDir);
@@ -307,6 +361,9 @@ module.exports = (config = {}) => {
 
                                 writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
 
+                                // the thread might not have been marked as started if it never started properly!
+                                threadStarted = true;
+                                threadDelayTout.clearTimeout();
                                 threadsMeta[threadNo].complete = true;
 
                                 exitCode = 1;
@@ -317,7 +374,12 @@ module.exports = (config = {}) => {
                     } else {
                         writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
                         printAllLogs();
+
+                        // the thread might not have been marked as started if it never started properly!
+                        threadStarted = true;
+                        threadDelayTout.clearTimeout();
                         threadsMeta[threadNo].complete = true;
+
                         resolve();
                     }
                 });
