@@ -276,6 +276,8 @@ module.exports = (config = {}) => {
                 }
             }
 
+            logCheck(`Start of thread #${threadNo}:\n`);
+
             return new Promise((resolve) => {
                 cypressProcess.on('close', async () => {
                     clearTimeout(inactivityTimer);

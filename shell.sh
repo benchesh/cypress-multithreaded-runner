@@ -15,4 +15,4 @@ timeTaken=$((SECONDS - start))
 
 echo "$threadNo,$timeTaken" >>"$threadPerformanceFilepath" # record the length of time it took for the thread to complete
 
-echo Thread "$threadNo" has completed.
+echo Thread \#"$threadNo" has completed.
