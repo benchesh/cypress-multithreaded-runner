@@ -222,13 +222,13 @@ module.exports = (config = {}) => {
     if (onlyRunSpecFilesIncludingAnyText) {
         console.log(`NOTE: onlyRunSpecFilesIncludingAnyText is set to ["${onlyRunSpecFilesIncludingAnyText.join(', "')}"]. Therefore, only spec files that contain any strings from this array will be processed.\n`);
 
-        reportHeadNotes.push(`onlyRunSpecFilesIncludingAnyText is set to ["${onlyRunSpecFilesIncludingAnyText.join(', "')}"]. Therefore, only spec files that contain any strings from this array were processed.\n`);
+        reportHeadNotes.push(`onlyRunSpecFilesIncludingAnyText was set to ["${onlyRunSpecFilesIncludingAnyText.join(', "')}"]. Therefore, only spec files that contained any strings from this array were processed.\n`);
     }
 
     if (onlyRunSpecFilesIncludingAllText) {
         console.log(`NOTE: onlyRunSpecFilesIncludingAllText is set to ["${onlyRunSpecFilesIncludingAllText.join(', "')}"]. Therefore, only spec files that contain all strings from this array will be processed.\n`)
 
-        reportHeadNotes.push(`onlyRunSpecFilesIncludingAllText is set to ["${onlyRunSpecFilesIncludingAllText.join(', "')}"]. Therefore, only spec files that contain all strings from this array were processed.\n`);
+        reportHeadNotes.push(`onlyRunSpecFilesIncludingAllText was set to ["${onlyRunSpecFilesIncludingAllText.join(', "')}"]. Therefore, only spec files that contained all strings from this array were processed.\n`);
     }
 
     console.log(`${testThreadsJSON.length} thread${testThreadsJSON.length !== 1 ? 's' : ''} will be created to test spec files in the following director${testThreadsJSON.length !== 1 ? 'ies' : 'y'}:\n${wordpressTestThreadDirs.join('\n')}\n`);
