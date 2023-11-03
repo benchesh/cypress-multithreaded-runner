@@ -13,7 +13,8 @@ const path = require('path');
 const { argv } = yargs(hideBin(process.argv))
     .array(['onlyRunSpecFilesIncludingAnyText', 'onlyRunSpecFilesIncludingAllText', 'ignoreCliOverrides'])
     .choices('logMode', [1, 2, 3, 4])
-    .number(['maxThreadRestarts', 'threadDelay', 'threadTimeout',
+    .choices('threadMode', [1, 2])
+    .number(['maxThreadRestarts', 'threadDelay', 'threadTimeout', 'maxCPUThreads',
         'waitForFileExist.minSize', 'waitForFileExist.timeout'
     ])
     .boolean(['openAllure', 'combineAllure', 'hostAllure', 'alwaysWaitForThreadDelay',
@@ -130,8 +131,12 @@ module.exports = (config = {}) => {
     const alwaysWaitForThreadDelay = fullConfig.alwaysWaitForThreadDelay ?? false;
     const logMode = fullConfig.logMode || 1;
     const allureReportHeading = fullConfig.allureReportHeading ? `: ${fullConfig.allureReportHeading}` : '';
+    const threadMode = fullConfig.threadMode || 1;
 
     const reportHeadNotes = [];
+
+    const maxCPUThreads = fullConfig.maxCPUThreads || Math.ceil(require('os').cpus().length / 2);
+    let noOfThreadsInUse = 0;
 
     const onlyRunSpecFilesIncludingAnyText = strArrayTransformer(fullConfig.onlyRunSpecFilesIncludingAnyText);
     const onlyRunSpecFilesIncludingAllText = strArrayTransformer(fullConfig.onlyRunSpecFilesIncludingAllText);
@@ -145,7 +150,7 @@ module.exports = (config = {}) => {
         const arrStr = [grepTags, grep, grepUntagged, passthroughEnvArgs].filter(str => str).join(',');
 
         if (!arrStr) return '';
-        
+
         return `,${arrStr}`
     })();
 
@@ -169,7 +174,13 @@ module.exports = (config = {}) => {
 
     let exitCode = 0;
 
-    let wordpressTestThreadDirs = fullConfig.singleThread ? [specsDir] : getDirectories(specsDir);
+    let wordpressTestThreadDirs = fullConfig.singleThread ? [specsDir] : (() => {
+        if (threadMode === 1) {
+            return getDirectories(specsDir);
+        } else {
+            return getFilesRecursive(specsDir);
+        }
+    })();
 
     if (!wordpressTestThreadDirs.length) {
         console.error(red('CRITICAL ERROR: No test directories were found!'));
@@ -245,6 +256,16 @@ module.exports = (config = {}) => {
 
     (async () => {
         async function spawnThread(thread, threadNo, logs = '', restartAttempts = 0, threadStarted = false) {
+            if (noOfThreadsInUse) {
+                if (logMode === 1) {
+                    console.log(`Thread #${threadNo} is now starting, and its logs will be printed when all prior threads have completed.`);
+                }
+            } else if (logMode === 1) {
+                console.log(`Thread #${threadNo} is now starting...`);
+            }
+
+            noOfThreadsInUse++;
+
             let restartTests = false;
 
             const cypressProcess = spawn('bash', [
@@ -385,6 +406,7 @@ module.exports = (config = {}) => {
 
                                 // the thread might not have been marked as started if it never started properly!
                                 threadStarted = true;
+                                noOfThreadsInUse--;
                                 threadDelayTout.clearTimeout();
                                 threadsMeta[threadNo].complete = true;
 
@@ -399,6 +421,7 @@ module.exports = (config = {}) => {
 
                         // the thread might not have been marked as started if it never started properly!
                         threadStarted = true;
+                        noOfThreadsInUse--;
                         threadDelayTout.clearTimeout();
                         threadsMeta[threadNo].complete = true;
 
@@ -448,7 +471,11 @@ module.exports = (config = {}) => {
         // the maximum delay before starting the next thread
         // the delay will be interrupted as soon as the current Cypress has started running, unless alwaysWaitForThreadDelay is true
         const delay = (ms) => {
-            return new Promise(resolve => threadDelayTout.setTimeout(resolve, ms));
+            return new Promise(resolve => threadDelayTout.setTimeout(() => {
+                if (noOfThreadsInUse < maxCPUThreads) {
+                    resolve();
+                }
+            }, ms));
         }
 
         async function runCypressTests() {
