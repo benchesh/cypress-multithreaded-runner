@@ -14,10 +14,10 @@ const { argv } = yargs(hideBin(process.argv))
     .array(['onlyRunSpecFilesIncludingAnyText', 'onlyRunSpecFilesIncludingAllText', 'ignoreCliOverrides'])
     .choices('logMode', [1, 2, 3, 4])
     .number(['maxThreadRestarts', 'threadDelay', 'threadTimeout',
-        'waitForFileExist.minSize', 'waitForFileExist.timeout',
+        'waitForFileExist.minSize', 'waitForFileExist.timeout'
     ])
     .boolean(['openAllure', 'combineAllure', 'hostAllure', 'alwaysWaitForThreadDelay',
-        'waitForFileExist.deleteAfterCompletion', 'waitForFileExist.stopWaitingWhenFirstThreadCompletes',
+        'waitForFileExist.deleteAfterCompletion', 'waitForFileExist.stopWaitingWhenFirstThreadCompletes'
     ])
     .alias('open', 'openAllure')
     .alias('combine', 'combineAllure')
@@ -129,19 +129,24 @@ module.exports = (config = {}) => {
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
     const alwaysWaitForThreadDelay = fullConfig.alwaysWaitForThreadDelay ?? false;
     const logMode = fullConfig.logMode || 1;
+    const allureReportHeading = fullConfig.allureReportHeading ? `: ${fullConfig.allureReportHeading}` : '';
+
+    const reportHeadNotes = [];
 
     const onlyRunSpecFilesIncludingAnyText = strArrayTransformer(fullConfig.onlyRunSpecFilesIncludingAnyText);
     const onlyRunSpecFilesIncludingAllText = strArrayTransformer(fullConfig.onlyRunSpecFilesIncludingAllText);
 
     const additionalCypressEnvArgs = (() => {
-        const grepTags = fullConfig.grepTags ? `grepTags="${fullConfig.grepTags}"` : '';
-        const grep = fullConfig.grep ? `grep="${fullConfig.grep}"` : '';
-        const grepUntagged = fullConfig.grepUntagged ? `grepUntagged="${fullConfig.grepUntagged}"` : '';
-        const passthroughEnvArgs = fullConfig.passthroughEnvArgs || '';
+        const grepTags = fullConfig.grepTags ? `grepTags="${fullConfig.grepTags}"` : null;
+        const grep = fullConfig.grep ? `grep="${fullConfig.grep}"` : null;
+        const grepUntagged = fullConfig.grepUntagged ? `grepUntagged="${fullConfig.grepUntagged}"` : null;
+        const passthroughEnvArgs = fullConfig.passthroughEnvArgs || null;
 
-        if (!grepTags && !grep && !grepUntagged && !passthroughEnvArgs) return '';
+        const arrStr = [grepTags, grep, grepUntagged, passthroughEnvArgs].filter(str => str).join(',');
 
-        return `,${[grepTags, grep, grepUntagged, passthroughEnvArgs].filter(str => str).join(',')}`
+        if (!arrStr) return '';
+        
+        return `,${arrStr}`
     })();
 
     const openAllure = fullConfig.openAllure || fullConfig.open || false;
@@ -156,7 +161,7 @@ module.exports = (config = {}) => {
     const runShellCommand = (cmd) => {
         execSync(cmd, {
             cwd: path.resolve(reportDir),
-            stdio: [null, process.stdout, process.stderr],
+            stdio: [null, process.stdout, process.stderr]
         });
     };
 
@@ -164,7 +169,7 @@ module.exports = (config = {}) => {
 
     let exitCode = 0;
 
-    const wordpressTestThreadDirs = fullConfig.singleThread ? [specsDir] : getDirectories(specsDir);
+    let wordpressTestThreadDirs = fullConfig.singleThread ? [specsDir] : getDirectories(specsDir);
 
     if (!wordpressTestThreadDirs.length) {
         console.error(red('CRITICAL ERROR: No test directories were found!'));
@@ -180,7 +185,7 @@ module.exports = (config = {}) => {
             retries: 0,
             perfResults: {},
             logs: '',
-            printedLogs: false,
+            printedLogs: false
         }
     }
 
@@ -195,25 +200,42 @@ module.exports = (config = {}) => {
     const allureResultsPath = path.join(reportDir, 'allure-results');
 
     // add a custom config to every thread to pass into the shell script
-    const testThreads = wordpressTestThreadDirs.map((dir) => JSON.stringify({
-        ...cypressConfigObject,
-        specPattern: onlyRunSpecFilesIncludingAnyText || onlyRunSpecFilesIncludingAllText
-            ? getFilesRecursive(dir).filter(file => {
-                const fileStr = fs.readFileSync(file).toString('utf8');
-                return (onlyRunSpecFilesIncludingAnyText || ['']).some(text => fileStr.includes(text))
-                    && (onlyRunSpecFilesIncludingAllText || ['']).every(text => fileStr.includes(text))
-            })
-            : dir,
-    }));
+    const testThreads = wordpressTestThreadDirs.map((dir) => {
+        return {
+            ...cypressConfigObject,
+            specPattern: onlyRunSpecFilesIncludingAnyText || onlyRunSpecFilesIncludingAllText
+                ? getFilesRecursive(dir).filter(file => {
+                    const fileStr = fs.readFileSync(file).toString('utf8');
+                    return (onlyRunSpecFilesIncludingAnyText || ['']).some(text => fileStr.includes(text))
+                        && (onlyRunSpecFilesIncludingAllText || ['']).every(text => fileStr.includes(text))
+                })
+                : dir
+        }
+    }).filter((thread) => thread.specPattern.length);
 
-    console.log(`${testThreads.length} thread${testThreads.length !== 1 ? 's' : ''} will be created to test spec files in the following director${testThreads.length !== 1 ? 'ies' : 'y'}:\n${wordpressTestThreadDirs.join('\n')}\n`);
+    const testThreadsJSON = testThreads.map((thread) => JSON.stringify(thread));
+
+    if (onlyRunSpecFilesIncludingAnyText || onlyRunSpecFilesIncludingAllText) {//todo refactor this, it's awful
+        wordpressTestThreadDirs = wordpressTestThreadDirs.filter((dir) => Object.values(testThreads).find(obj => obj.specPattern.some(specFile => specFile.startsWith(dir))));
+    }
 
     if (onlyRunSpecFilesIncludingAnyText) {
-        console.log(`NOTE: onlyRunSpecFilesIncludingAnyText is set to ["${onlyRunSpecFilesIncludingAnyText.join(', "')}"]. Therefore, only spec files that contain any text values from this array will run.`)
+        console.log(`NOTE: onlyRunSpecFilesIncludingAnyText is set to ["${onlyRunSpecFilesIncludingAnyText.join(', "')}"]. Therefore, only spec files that contain any strings from this array will be processed.\n`);
+
+        reportHeadNotes.push(`onlyRunSpecFilesIncludingAnyText is set to ["${onlyRunSpecFilesIncludingAnyText.join(', "')}"]. Therefore, only spec files that contain any strings from this array were processed.\n`);
     }
 
     if (onlyRunSpecFilesIncludingAllText) {
-        console.log(`NOTE: onlyRunSpecFilesIncludingAllText is set to ["${onlyRunSpecFilesIncludingAllText.join(', "')}"]. Therefore, only spec files that contain any text values from this array will run.`)
+        console.log(`NOTE: onlyRunSpecFilesIncludingAllText is set to ["${onlyRunSpecFilesIncludingAllText.join(', "')}"]. Therefore, only spec files that contain all strings from this array will be processed.\n`)
+
+        reportHeadNotes.push(`onlyRunSpecFilesIncludingAllText is set to ["${onlyRunSpecFilesIncludingAllText.join(', "')}"]. Therefore, only spec files that contain all strings from this array were processed.\n`);
+    }
+
+    console.log(`${testThreadsJSON.length} thread${testThreadsJSON.length !== 1 ? 's' : ''} will be created to test spec files in the following director${testThreadsJSON.length !== 1 ? 'ies' : 'y'}:\n${wordpressTestThreadDirs.join('\n')}\n`);
+
+    if (!testThreadsJSON.length) {
+        console.error(red('CRITICAL ERROR: No spec files were found!'));
+        process.exit(1);
     }
 
     // needed if a Cypress instance doesn't log anything but the shellscript still wants to write to the report directory
@@ -431,9 +453,9 @@ module.exports = (config = {}) => {
 
         async function runCypressTests() {
             let threadsArr = []
-            threadsArr.push(spawnThread(testThreads[0], 1));
+            threadsArr.push(spawnThread(testThreadsJSON[0], 1));
 
-            if (testThreads.length > 1) {
+            if (testThreadsJSON.length > 1) {
                 if (waitForFileExistFilepath) {
                     // decrease total delay by .5s as waitForFileExist will check for the file in intervals of .5s
                     await delay(threadDelay - 500 > 0 ? threadDelay - 500 : 0);
@@ -443,9 +465,9 @@ module.exports = (config = {}) => {
                     await delay(threadDelay);
                 }
 
-                threadsArr.push(spawnThread(testThreads[1], 2));
+                threadsArr.push(spawnThread(testThreadsJSON[1], 2));
 
-                for (const [index, thread] of testThreads.slice(2).entries()) {
+                for (const [index, thread] of testThreadsJSON.slice(2).entries()) {
                     await delay(threadDelay);
                     threadsArr.push(spawnThread(thread, Number(index) + 3));
                 }
@@ -530,7 +552,7 @@ module.exports = (config = {}) => {
                         failedTests,
                         naturalString: secondsToNaturalString(secs),
                         secs,
-                        mostFailsForOneTest,
+                        mostFailsForOneTest
                     };
 
                     // the longest thread is used as the basis of comparison with the others
@@ -538,7 +560,7 @@ module.exports = (config = {}) => {
                         longestThread = {
                             index,
                             naturalString: secondsToNaturalString(secs),
-                            secs,
+                            secs
                         };
                     }
                 });
@@ -548,7 +570,7 @@ module.exports = (config = {}) => {
                 let str = '';
 
                 wordpressTestThreadDirs.forEach((threadPath, index) => {
-                    const threadId = testThreads.length > 9 ? String(index + 1).padStart(2, '0') : index + 1;
+                    const threadId = testThreadsJSON.length > 9 ? String(index + 1).padStart(2, '0') : index + 1;
 
                     const shortThreadPath = threadPath.length > 60
                         ? `...${threadPath.substring(threadPath.length - 57).match(/\/(.*)$/)?.[0] || threadPath.substring(threadPath.length - 57)}`
@@ -714,25 +736,29 @@ module.exports = (config = {}) => {
             <div class="cmr-content">
                 ${criticalErrorThreads.length ? `
                 <div class="cmr-error">
-                    <h2>Cypress Multithreaded Runner [CRITICAL ERRORS - PLEASE READ]</h2>
-                    Be advised! This Allure report doesn't tell the full story, as <strong>thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete! Therefore, one or more tests may have not been tested! Scroll down to read the full logs from the separate threads.
+                    <h2>Cypress Multithreaded Runner${allureReportHeading} [CRITICAL ERRORS - PLEASE READ]</h2>
+                    Be advised! This Allure report doesn't tell the full story, as <strong>thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete! Therefore, one or more spec files may have not been fully tested! Scroll down to read the full logs from the separate threads.
                 </div>` : ''}
                 ${minorErrorThreads.length ? `
                 <div class="cmr-error">
-                    ${criticalErrorThreads.length ? '' : '<h2>Cypress Multithreaded Runner</h2>'}
+                    ${criticalErrorThreads.length ? '' : `<h2>Cypress Multithreaded Runner${allureReportHeading}</h2>`}
                     ${minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${criticalErrorThreads.length ? '' : '<br>Scroll down to read the full logs from the separate threads.'}
                 </div>` : ''}
                 ${warnThreads.length ? `
                 <div class="cmr-warn">
-                    ${allErrorThreads.length ? '' : '<h2>Cypress Multithreaded Runner</h2>'}
+                    ${allErrorThreads.length ? '' : `<h2>Cypress Multithreaded Runner${allureReportHeading}</h2>`}
                     ${warnThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${allErrorThreads.length ? '' : '<br>Scroll down to read the full logs from the separate threads.'}
                 </div>` : ''}
                 ${!allErrorThreads.length && !warnThreads.length ? `
                 <div class="cmr-success">
-                    <h2>Cypress Multithreaded Runner</h2>
+                    <h2>Cypress Multithreaded Runner${allureReportHeading}</h2>
                     Everything seems completely fine! No tests needed retrying. Scroll down to read the full logs from the separate threads.
                 </div>
                 `: ''}
+                ${reportHeadNotes.length ? `
+                <div class="cmr-notes">
+                    ${reportHeadNotes.map(note => `NOTE: ${note}`).join('<br>')}
+                </div>` : ''}
             </div>`;
 
             const cmrAllureFooter = `<div class="cmr-content cmr-footer">${allLogs
@@ -753,7 +779,7 @@ module.exports = (config = {}) => {
                 }
             
                 .cmr-content div:nth-child(even) {
-                  filter: brightness(0.9);
+                  filter: brightness(0.92);
                 }
             
                 .cmr-content pre {
@@ -777,6 +803,10 @@ module.exports = (config = {}) => {
             
                 .cmr-content div.cmr-success {
                   background: #97cc64;
+                }
+
+                .cmr-content div.cmr-notes {
+                  background: #aaa;
                 }
             
                 .cmr-content .cmr-pre-heading {
