@@ -132,10 +132,13 @@ module.exports = (config = {}) => {
     const logMode = fullConfig.logMode || 1;
     const allureReportHeading = fullConfig.allureReportHeading ? `: ${fullConfig.allureReportHeading}` : '';
     const threadMode = fullConfig.threadMode || 1;
+    const threadOrder = fullConfig.threadOrder ?? 'benchmark';
+    const saveThreadBenchmark = fullConfig.saveThreadBenchmark || true;
+    const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
 
     const reportHeadNotes = [];
 
-    const maxCPUThreads = fullConfig.maxCPUThreads || Math.ceil(require('os').cpus().length / 2);
+    const maxCPUThreads = !fullConfig.singleThread ? fullConfig.maxCPUThreads || Math.ceil(require('os').cpus().length / 3) : 1;
     let noOfThreadsInUse = 0;
 
     const onlyRunSpecFilesIncludingAnyText = strArrayTransformer(fullConfig.onlyRunSpecFilesIncludingAnyText);
@@ -153,6 +156,15 @@ module.exports = (config = {}) => {
 
         return `,${arrStr}`
     })();
+
+    const benchmarkObj = {
+        cypressConfigFilepath,
+        specsDir,
+        threadMode,
+        additionalCypressEnvArgs,
+    };
+
+    const benchmarkId = JSON.stringify(benchmarkObj);
 
     const openAllure = fullConfig.openAllure || fullConfig.open || false;
     const combineAllure = fullConfig.combineAllure || fullConfig.combine || false;
@@ -187,31 +199,15 @@ module.exports = (config = {}) => {
         process.exit(1);
     }
 
-    const threadsMeta = {};
-
-    for (i in wordpressTestThreadDirs) {
-        threadsMeta[Number(i) + 1] = {
-            threadNo: Number(i) + 1,
-            status: 'success',
-            retries: 0,
-            perfResults: {},
-            logs: '',
-            printedLogs: false
-        }
-    }
-
     if (getFiles(specsDir).length) {
         console.warn(orange(`WARNING: One or more files have been placed at the root of ${specsDir}. All spec files must be in subdirectories, otherwise they will not get tested when run in multithreaded mode:\n${getFiles(specsDir).join('\n')}\n`));
     }
-
-    // a basic CSV for recording how many seconds each thread took to run
-    const threadPerformanceFilepath = path.join(reportDir, 'thread-performance.csv');
 
     // raw test results are saved to this directory, which are then used to create the Allure report
     const allureResultsPath = path.join(reportDir, 'allure-results');
 
     // add a custom config to every thread to pass into the shell script
-    const testThreads = wordpressTestThreadDirs.map((dir) => {
+    const unsortedTestThreads = wordpressTestThreadDirs.map((dir) => {
         return {
             ...cypressConfigObject,
             specPattern: onlyRunSpecFilesIncludingAnyText || onlyRunSpecFilesIncludingAllText
@@ -224,11 +220,40 @@ module.exports = (config = {}) => {
         }
     }).filter((thread) => thread.specPattern.length);
 
-    const testThreadsJSON = testThreads.map((thread) => JSON.stringify(thread));
+    const savedThreadBenchmark = fs.existsSync(threadBenchmarkFilepath) ? JSON.parse(fs.readFileSync(threadBenchmarkFilepath)) : {};
 
-    if (onlyRunSpecFilesIncludingAnyText || onlyRunSpecFilesIncludingAllText) {//todo refactor this, it's awful
-        wordpressTestThreadDirs = wordpressTestThreadDirs.filter((dir) => Object.values(testThreads).find(obj => obj.specPattern.some(specFile => specFile.startsWith(dir))));
+    let testThreads = [];
+
+    if (threadOrder === 'benchmark' && savedThreadBenchmark[benchmarkId]) {
+        unsortedTestThreads.forEach(thread => {// bring any threads not present in the benchmark to the front
+            if (!savedThreadBenchmark[benchmarkId].order.includes(String(thread.specPattern))) {
+                testThreads.push(thread);
+            }
+        });
+
+        savedThreadBenchmark[benchmarkId].order.forEach(threadPath => {
+            testThreads.push(unsortedTestThreads.find(thread => String(thread.specPattern) === threadPath))
+        });
+
+        testThreads = testThreads.filter((thread) => thread);
+    } else {
+        testThreads = unsortedTestThreads;
     }
+
+    const threadsMeta = {};
+
+    testThreads.forEach((thread, index) => {
+        threadsMeta[Number(index) + 1] = {
+            cypressConfig: JSON.stringify(thread),
+            path: String(thread.specPattern),
+            threadNo: Number(index) + 1,
+            status: 'success',
+            retries: 0,
+            perfResults: {},
+            logs: '',
+            printedLogs: false
+        }
+    });
 
     if (onlyRunSpecFilesIncludingAnyText) {
         console.log(`NOTE: onlyRunSpecFilesIncludingAnyText is set to ["${onlyRunSpecFilesIncludingAnyText.join(', "')}"]. Therefore, only spec files that contain any strings from this array will be processed.\n`);
@@ -242,9 +267,9 @@ module.exports = (config = {}) => {
         reportHeadNotes.push(`onlyRunSpecFilesIncludingAllText was set to ["${onlyRunSpecFilesIncludingAllText.join(', "')}"]. Therefore, only spec files that contained all strings from this array were processed.\n`);
     }
 
-    console.log(`${testThreadsJSON.length} thread${testThreadsJSON.length !== 1 ? 's' : ''} will be created to test spec files in the following director${testThreadsJSON.length !== 1 ? 'ies' : 'y'}:\n${wordpressTestThreadDirs.join('\n')}\n`);
+    console.log(`${testThreads.length} thread${testThreads.length !== 1 ? 's' : ''} will be created to test spec files in the following order:\n${Object.values(testThreads).map(thread => thread.specPattern).join('\n')}\nA maximum of ${testThreads.length < maxCPUThreads ? testThreads.length : maxCPUThreads} threads will be used at any one time\n`);
 
-    if (!testThreadsJSON.length) {
+    if (!testThreads.length) {
         console.error(red('CRITICAL ERROR: No spec files were found!'));
         process.exit(1);
     }
@@ -254,15 +279,23 @@ module.exports = (config = {}) => {
 
     const threadDelayTout = (new SuperTout);
 
+    let logQueue = [];
+
     (async () => {
-        async function spawnThread(thread, threadNo, logs = '', restartAttempts = 0, threadStarted = false) {
+        async function spawnThread(threadNo, logs = '', restartAttempts = 0, threadStarted = false) {
             if (noOfThreadsInUse) {
                 if (logMode === 1) {
-                    console.log(`Thread #${threadNo} is now starting, and its logs will be printed when all prior threads have completed.`);
+                    console.log(`Thread #${threadNo} is now starting, and its logs will be printed when all preceding threads have completed.`);
+                } else if (logMode === 2) {
+                    const fullQueue = [Object.values(threadsMeta).filter(thread => thread.printedLogs === 'some')].concat(logQueue);
+
+                    console.log(`Thread #${threadNo} is now starting, and its logs will be printed once thread${fullQueue.length !== 1 ? 's' : ''}${fullQueue.map(thread => thread.threadNo)} have printed their logs.`);
                 }
-            } else if (logMode === 1) {
+            } else {
                 console.log(`Thread #${threadNo} is now starting...`);
             }
+
+            threadsMeta[threadNo].perfResults.startTime = performance.now();
 
             noOfThreadsInUse++;
 
@@ -271,12 +304,11 @@ module.exports = (config = {}) => {
             const cypressProcess = spawn('bash', [
                 path.resolve(__dirname, 'shell.sh'),
                 // arguments for the shell script
-                threadPerformanceFilepath || '',// $1
-                allureResultsPath || '',// $2
-                cypressConfigFilepath || '',// $3
-                thread,// $4
-                threadNo,// $5
-                additionalCypressEnvArgs,// $6
+                allureResultsPath || '',// $1
+                cypressConfigFilepath || '',// $2
+                threadsMeta[threadNo].cypressConfig,// $3
+                threadNo,// $4
+                additionalCypressEnvArgs,// $5
             ]);
 
             const customWarning = (str) => {
@@ -352,15 +384,15 @@ module.exports = (config = {}) => {
                 if (threadsMeta[threadNo].printedLogs) {
                     threadsMeta[threadNo].printedLogs = 'all';
 
-                    const queue = Object.values(threadsMeta).filter(thread => thread.printedLogs === 'queue');
+                    logQueue = Object.values(threadsMeta).filter(thread => thread.printedLogs === 'queue');
                     const nextThreadToLog = Object.values(threadsMeta).find(thread => !thread.printedLogs);
 
-                    for (let index = 0; index < queue.length; index++) {
-                        if (logMode === 1 && queue[index].threadNo > nextThreadToLog?.threadNo) {//leave queued to maintain chronology
+                    for (let index = 0; index < logQueue.length; index++) {
+                        if (logMode === 1 && logQueue[index].threadNo > nextThreadToLog?.threadNo) {//leave queued to maintain chronology
                             break;
                         } else {
-                            threadsMeta[queue[index].threadNo].printedLogs = 'all';
-                            process.stdout.write(queue[index].logs);
+                            threadsMeta[logQueue[index].threadNo].printedLogs = 'all';
+                            process.stdout.write(logQueue[index].logs);
                         }
                     }
 
@@ -394,7 +426,7 @@ module.exports = (config = {}) => {
                                     fs.rmSync(path.join(allureResultsPath, String(threadNo)), { recursive: true, force: true });
                                 }
 
-                                await spawnThread(thread, threadNo, logs, restartAttempts, threadStarted);
+                                await spawnThread(threadNo, logs, restartAttempts, threadStarted);
                             } else {
                                 threadsMeta[threadNo].status = 'error';
                                 threadsMeta[threadNo].errorType = 'critical';
@@ -409,6 +441,9 @@ module.exports = (config = {}) => {
                                 noOfThreadsInUse--;
                                 threadDelayTout.clearTimeout();
                                 threadsMeta[threadNo].complete = true;
+                                threadsMeta[threadNo].perfResults.secs = parseInt(
+                                    (performance.now() - threadsMeta[threadNo].perfResults.startTime) / 1000
+                                );
 
                                 exitCode = 1;
                             }
@@ -424,6 +459,9 @@ module.exports = (config = {}) => {
                         noOfThreadsInUse--;
                         threadDelayTout.clearTimeout();
                         threadsMeta[threadNo].complete = true;
+                        threadsMeta[threadNo].perfResults.secs = parseInt(
+                            (performance.now() - threadsMeta[threadNo].perfResults.startTime) / 1000
+                        );
 
                         resolve();
                     }
@@ -480,9 +518,9 @@ module.exports = (config = {}) => {
 
         async function runCypressTests() {
             let threadsArr = []
-            threadsArr.push(spawnThread(testThreadsJSON[0], 1));
+            threadsArr.push(spawnThread(1));
 
-            if (testThreadsJSON.length > 1) {
+            if (testThreads.length > 1) {
                 if (waitForFileExistFilepath) {
                     // decrease total delay by .5s as waitForFileExist will check for the file in intervals of .5s
                     await delay(threadDelay - 500 > 0 ? threadDelay - 500 : 0);
@@ -492,11 +530,11 @@ module.exports = (config = {}) => {
                     await delay(threadDelay);
                 }
 
-                threadsArr.push(spawnThread(testThreadsJSON[1], 2));
+                threadsArr.push(spawnThread(2));
 
-                for (const [index, thread] of testThreadsJSON.slice(2).entries()) {
+                for (const [index] of testThreads.slice(2).entries()) {
                     await delay(threadDelay);
-                    threadsArr.push(spawnThread(thread, Number(index) + 3));
+                    threadsArr.push(spawnThread(Number(index) + 3));
                 }
             }
 
@@ -524,111 +562,105 @@ module.exports = (config = {}) => {
                 return `${minutes ? `${minutes} minutes, ` : ''}${remainingSeconds} seconds`;
             };
 
-            let longestThread = { secs: 0 };
+            let longestThread = { secs: -1 };
 
-            // needed to sort the csv in order of thread id
-            const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+            Object.values(threadsMeta).forEach((thread) => {
+                const failedTests = {};
+                let mostFailsForOneTest = 0;
 
-            fs.readFileSync(threadPerformanceFilepath)
-                .toString('utf8')
-                .trim()
-                .split('\n')
-                .sort(collator.compare)
-                .forEach((csvRow) => {
-                    const secs = Number(csvRow.split(',')[1]);
-                    const index = Number(csvRow.split(',')[0]);// get the index from the csv in case any thread DNF
+                // record how many tests failed, and how many times!
+                getFiles(
+                    path.join(allureResultsPath, String(thread.threadNo)),
+                ).forEach((file) => {
+                    if (file.endsWith('.json')) {
+                        const { status, labels, fullName } = fs.readJsonSync(file);
 
-                    const failedTests = {};
-                    let mostFailsForOneTest = 0;
+                        if (
+                            status
+                            && labels
+                            && fullName
+                            && !['passed', 'skipped'].includes(status)
+                        ) {
+                            // ensure the key is wholly unique (in case two tests have the same title)
+                            const key = `${fullName}${JSON.stringify(labels)}`;
 
-                    // record how many tests failed, and how many times!
-                    getFiles(
-                        path.join(allureResultsPath, String(index)),
-                    ).forEach((file) => {
-                        if (file.endsWith('.json')) {
-                            const { status, labels, fullName } = fs.readJsonSync(file);
+                            if (!failedTests[key]) failedTests[key] = 1;
+                            else failedTests[key] += 1;
 
-                            if (
-                                status
-                                && labels
-                                && fullName
-                                && !['passed', 'skipped'].includes(status)
-                            ) {
-                                // ensure the key is wholly unique (in case two tests have the same title)
-                                const key = `${fullName}${JSON.stringify(labels)}`;
-
-                                if (!failedTests[key]) failedTests[key] = 1;
-                                else failedTests[key] += 1;
-
-                                if (failedTests[key] > mostFailsForOneTest) {
-                                    mostFailsForOneTest = failedTests[key];
-                                }
+                            if (failedTests[key] > mostFailsForOneTest) {
+                                mostFailsForOneTest = failedTests[key];
                             }
                         }
-
-                        // files from all threads need to be in the same directory to construct the Allure report
-                        fs.moveSync(
-                            file,
-                            path.resolve(allureResultsPath, path.basename(file)),
-                            { overwrite: true },
-                        );
-                    });
-
-                    // extract the thread id from the csv and store the records
-                    threadsMeta[Number(csvRow.split(',')[0])].perfResults = {
-                        failedTests,
-                        naturalString: secondsToNaturalString(secs),
-                        secs,
-                        mostFailsForOneTest
-                    };
-
-                    // the longest thread is used as the basis of comparison with the others
-                    if (secs > longestThread.secs) {
-                        longestThread = {
-                            index,
-                            naturalString: secondsToNaturalString(secs),
-                            secs
-                        };
                     }
+
+                    // files from all threads need to be in the same directory to construct the Allure report
+                    fs.moveSync(
+                        file,
+                        path.resolve(allureResultsPath, path.basename(file)),
+                        { overwrite: true },
+                    );
                 });
 
+                threadsMeta[thread.threadNo].perfResults = {
+                    ...thread.perfResults,
+                    failedTests,
+                    naturalString: secondsToNaturalString(thread.perfResults.secs),
+                    mostFailsForOneTest
+                };
+
+                // the longest thread is used as the basis of comparison with the others
+                if (thread.perfResults.secs > longestThread.secs) {
+                    longestThread = {
+                        threadNo: thread.threadNo,
+                        naturalString: secondsToNaturalString(thread.perfResults.secs),
+                        secs: thread.perfResults.secs
+                    };
+                }
+            });
+
+            if (saveThreadBenchmark) {
+                benchmarkObj.order = Object.values(threadsMeta).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path);
+
+                fs.writeFileSync(threadBenchmarkFilepath, JSON.stringify({
+                    ...savedThreadBenchmark,
+                    [benchmarkId]: benchmarkObj,
+                }, null, 4));
+            }
+
             // a visual representation of how each thread performed, to show where any bottlenecks lie
-            const generateThreadBars = (totalTime) => {
+            const generateThreadBars = (timeOfLongestThread) => {
                 let str = '';
 
-                wordpressTestThreadDirs.forEach((threadPath, index) => {
-                    const threadId = testThreadsJSON.length > 9 ? String(index + 1).padStart(2, '0') : index + 1;
+                Object.values(threadsMeta).forEach((thread) => {
+                    const threadPath = thread.path;
+
+                    const threadId = testThreads.length > 9 ? String(thread.threadNo).padStart(2, '0') : thread.threadNo;
 
                     const shortThreadPath = threadPath.length > 60
                         ? `...${threadPath.substring(threadPath.length - 57).match(/\/(.*)$/)?.[0] || threadPath.substring(threadPath.length - 57)}`
                         : threadPath;
 
-                    threadsMeta[index + 1].heading = [`Thread #${threadId} [${shortThreadPath}]`];
+                    threadsMeta[thread.threadNo].heading = [`Thread #${threadId} [${shortThreadPath}]`];
 
                     str += `Thread #${threadId} [${threadPath}]\n`;
 
-                    if (threadsMeta[index + 1].errorType === 'no-spec-files') {
+                    if (threadsMeta[thread.threadNo].errorType === 'no-spec-files') {
                         const err = 'ERROR: No spec files found!';
-                        threadsMeta[index + 1].heading.push(err);
-                        threadsMeta[index + 1].summary = `ERROR: No spec files were found for thread #${index + 1}`;
+                        threadsMeta[thread.threadNo].heading.push(err);
+                        threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${thread.threadNo}`;
                         str += `${err}\n\n`;
                         exitCode = 1;
-                        return;
-                    }
-
-                    // if there's a very high number of threads, they're prone to ending early
-                    if (threadsMeta[index + 1].errorType === 'critical' || !Object.entries(threadsMeta[index + 1].perfResults).length) {
+                    } else if (threadsMeta[thread.threadNo].errorType === 'critical') {
                         const err = 'CRITICAL ERROR: Thread did not complete!';
-                        threadsMeta[index + 1].status = 'error';
-                        threadsMeta[index + 1].errorType = 'critical';
-                        threadsMeta[index + 1].heading.push(err);
+                        threadsMeta[thread.threadNo].status = 'error';
+                        threadsMeta[thread.threadNo].errorType = 'critical';
+                        threadsMeta[thread.threadNo].heading.push(err);
                         str += `${err}\n\n`;
                         exitCode = 1;
-                        return;
                     }
 
                     const percentageOfTotal = (
-                        threadsMeta[index + 1].perfResults.secs / totalTime
+                        threadsMeta[thread.threadNo].perfResults.secs / timeOfLongestThread
                     ) * 100;
 
                     const percentageBar = `${Array.from({ length: Math.round(percentageOfTotal / 2) }, () => '█').concat(
@@ -640,7 +672,7 @@ module.exports = (config = {}) => {
                         const result = [];
 
                         if (Object.entries(obj).length) {
-                            threadsMeta[index + 1].status = 'warn';
+                            threadsMeta[thread.threadNo].status = 'warn';
 
                             const counts = Object.values(obj).reduce((acc, curr) => {
                                 acc[curr] = (acc[curr] || 0) + 1;
@@ -652,28 +684,28 @@ module.exports = (config = {}) => {
                             });
                         }
 
-                        if (threadsMeta[index + 1].retries) {
-                            threadsMeta[index + 1].status = 'warn';
-                            result.push(`the thread needed restarting ${threadsMeta[index + 1].retries} time${threadsMeta[index + 1].retries === 1 ? '' : 's'}`);
+                        if (threadsMeta[thread.threadNo].retries) {
+                            threadsMeta[thread.threadNo].status = 'warn';
+                            result.push(`the thread needed restarting ${threadsMeta[thread.threadNo].retries} time${threadsMeta[thread.threadNo].retries === 1 ? '' : 's'}`);
                         }
 
                         if (!result.length) {
                             return '';
                         }
 
-                        threadsMeta[index + 1].heading.push(`WARNING: ${arrToNaturalStr(result)}`);
-                        threadsMeta[index + 1].summary = `WARNING: Thread #${index + 1}: ${arrToNaturalStr(result)}`;
+                        threadsMeta[thread.threadNo].heading.push(`WARNING: ${arrToNaturalStr(result)}`);
+                        threadsMeta[thread.threadNo].summary = `WARNING: Thread #${thread.threadNo}: ${arrToNaturalStr(result)}`;
 
                         return ` (WARNING: ${arrToNaturalStr(result)})`;
                     };
 
-                    str += `${percentageBar} ${percentageOfTotal.toFixed(2)}% (${threadsMeta[index + 1].perfResults.naturalString})${reportFailedTests(threadsMeta[index + 1].perfResults.failedTests)}\n\n`;
+                    str += `${percentageBar} ${percentageOfTotal.toFixed(2)}% (${threadsMeta[thread.threadNo].perfResults.naturalString})${reportFailedTests(threadsMeta[thread.threadNo].perfResults.failedTests)}\n\n`;
                 });
 
                 return str;
             };
 
-            reportText = `See below to compare how each thread is performing.\n\n${generateThreadBars(longestThread.secs)}The percentages given above represent how much time individual threads take relative to thread #${longestThread.index}, which took the longest to complete at ${longestThread.naturalString}. Any thread that takes significantly longer than others will be a bottleneck, so the closer the percentages are to one another, the better. A wide range in percentages indicates that the threads could be balanced more efficiently. Any failing tests will retry up to two more times, so in those instances the affected threads will take much longer to complete than if all tests passed on the first attempt.`;
+            reportText = `See below to compare how each thread is performing.\n\n${generateThreadBars(longestThread.secs)}The percentages given above represent how much time individual threads take relative to thread #${longestThread.threadNo}, which took the longest to complete at ${longestThread.naturalString}. Any thread that takes significantly longer than others will be a bottleneck, so the closer the percentages are to one another, the better. A wide range in percentages indicates that the threads could be balanced more efficiently. Any failing tests will retry up to two more times, so in those instances the affected threads will take much longer to complete than if all tests passed on the first attempt.`;
 
             console.log(`\n\n${reportText}\n\n`);
 
