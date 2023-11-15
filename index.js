@@ -88,7 +88,7 @@ const getFilesRecursive = (srcpath, arrayOfFiles = []) => {
         if (fs.statSync(path.join(srcpath, file)).isDirectory()) {
             arrayOfFiles = getFilesRecursive(path.join(srcpath, file), arrayOfFiles)
         } else {
-            arrayOfFiles.push(path.resolve(srcpath, file))
+            arrayOfFiles.push(path.join(srcpath, file))
         }
     })
 
@@ -117,10 +117,10 @@ module.exports = (config = {}) => {
         fullConfig[prop] = config[prop];
     });
 
-    const cypressConfigFilepath = fullConfig.cypressConfig?.filepath ? path.resolve(fullConfig.cypressConfig.filepath) : null;
+    const cypressConfigFilepath = fullConfig.cypressConfig?.filepath ? path.join(fullConfig.cypressConfig.filepath) : null;
     const cypressConfigObject = fullConfig.cypressConfig?.object;
     const reportDir = fullConfig.reportDir ? path.join(fullConfig.reportDir) : null;
-    const specsDir = fullConfig.specsDir ? path.resolve(fullConfig.specsDir) : null;
+    const specsDir = fullConfig.specsDir ? path.join(fullConfig.specsDir) : null;
     const maxThreadRestarts = fullConfig.maxThreadRestarts ?? 5;
     const waitForFileExistTimeout = fullConfig.waitForFileExist?.timeout ?? 60;
     const waitForFileMinimumSize = fullConfig.waitForFileExist?.minSize ?? 2;
@@ -170,8 +170,8 @@ module.exports = (config = {}) => {
     const combineAllure = fullConfig.combineAllure || fullConfig.combine || false;
     const hostAllure = fullConfig.hostAllure || fullConfig.host || false;
 
-    const defaultAllureReportDir = path.resolve(reportDir, 'allure-report');
-    const allureReportDir = fullConfig.allureReportDir ? path.resolve(fullConfig.allureReportDir) : defaultAllureReportDir;
+    const defaultAllureReportDir = path.join(reportDir, 'allure-report');
+    const allureReportDir = fullConfig.allureReportDir ? path.join(fullConfig.allureReportDir) : defaultAllureReportDir;
 
     const threadLogsDir = path.join(reportDir, 'cypress-logs');
 
