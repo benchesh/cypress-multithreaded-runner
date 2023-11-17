@@ -69,16 +69,16 @@ const arrToNaturalStr = (arr) => {
     return str;
 }
 
-const strArrayTransformer = (data) => {
+const strArrayTransformer = (data, lowercase = true) => {
     if (!data) return null;
 
     if (typeof data === 'string') {
-        return [data]
+        return [lowercase ? data.toLowerCase() : data]
     }
 
     data = data.filter(str => str);
 
-    if (String(data)) return data
+    if (data.length) return data.map(str => str.toLowerCase())
 
     return null
 }
@@ -212,7 +212,7 @@ module.exports = (config = {}) => {
             ...cypressConfigObject,
             specPattern: onlyRunSpecFilesIncludingAnyText || onlyRunSpecFilesIncludingAllText
                 ? getFilesRecursive(dir).filter(file => {
-                    const fileStr = fs.readFileSync(file).toString('utf8');
+                    const fileStr = fs.readFileSync(file).toString('utf8').toLowerCase();
                     return (onlyRunSpecFilesIncludingAnyText || ['']).some(text => fileStr.includes(text))
                         && (onlyRunSpecFilesIncludingAllText || ['']).every(text => fileStr.includes(text))
                 })
