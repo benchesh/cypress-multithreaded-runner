@@ -11,13 +11,13 @@ const kill = require('tree-kill');
 const path = require('path');
 
 const { argv } = yargs(hideBin(process.argv))
-    .array(['onlyRunSpecFilesIncludingAnyText', 'onlyRunSpecFilesIncludingAllText', 'ignoreCliOverrides'])
+    .array(['onlyRunSpecFilesIncludingAnyText', 'onlyRunSpecFilesIncludingAllText', 'ignoreCliOverrides', 'specPhases'])
     .choices('logMode', [1, 2, 3, 4])
     .choices('threadMode', [1, 2])
     .number(['maxThreadRestarts', 'threadDelay', 'threadTimeout', 'maxCPUThreads',
         'waitForFileExist.minSize', 'waitForFileExist.timeout'
     ])
-    .boolean(['openAllure', 'combineAllure', 'hostAllure', 'alwaysWaitForThreadDelay',
+    .boolean(['openAllure', 'combineAllure', 'hostAllure',
         'waitForFileExist.deleteAfterCompletion', 'waitForFileExist.stopWaitingWhenFirstThreadCompletes'
     ])
     .alias('open', 'openAllure')
@@ -84,6 +84,10 @@ const strArrayTransformer = (data, lowercase = true) => {
 }
 
 const getFilesRecursive = (srcpath, arrayOfFiles = []) => {
+    if (!fs.statSync(srcpath).isDirectory()) {
+        return [srcpath];
+    }
+
     fs.readdirSync(srcpath).forEach(function (file) {
         if (fs.statSync(path.join(srcpath, file)).isDirectory()) {
             arrayOfFiles = getFilesRecursive(path.join(srcpath, file), arrayOfFiles)
@@ -120,7 +124,7 @@ module.exports = (config = {}) => {
     const cypressConfigFilepath = fullConfig.cypressConfig?.filepath ? path.join(fullConfig.cypressConfig.filepath) : null;
     const cypressConfigObject = fullConfig.cypressConfig?.object;
     const reportDir = fullConfig.reportDir ? path.join(fullConfig.reportDir) : null;
-    const specsDir = fullConfig.specsDir ? path.join(fullConfig.specsDir) : null;
+    const specPhases = fullConfig.specPhases ? fullConfig.specPhases.map(specPhase => path.join(specPhase)) : null;
     const maxThreadRestarts = fullConfig.maxThreadRestarts ?? 5;
     const waitForFileExistTimeout = fullConfig.waitForFileExist?.timeout ?? 60;
     const waitForFileMinimumSize = fullConfig.waitForFileExist?.minSize ?? 2;
@@ -128,7 +132,6 @@ module.exports = (config = {}) => {
     const stopWaitingForFileWhenFirstThreadCompletes = fullConfig.waitForFileExist?.stopWaitingWhenFirstThreadCompletes ?? true;
     const threadTimeout = fullConfig.threadTimeout ?? 600;
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
-    const alwaysWaitForThreadDelay = fullConfig.alwaysWaitForThreadDelay ?? false;
     const logMode = fullConfig.logMode || 1;
     const allureReportHeading = fullConfig.allureReportHeading ? `: ${fullConfig.allureReportHeading}` : '';
     const threadMode = fullConfig.threadMode || 1;
@@ -138,7 +141,7 @@ module.exports = (config = {}) => {
 
     const reportHeadNotes = [];
 
-    const maxCPUThreads = !fullConfig.singleThread ? fullConfig.maxCPUThreads || Math.ceil(require('os').cpus().length / 3) : 1;
+    const maxCPUThreads = fullConfig.maxCPUThreads || Math.ceil(require('os').cpus().length / 2);
     let noOfThreadsInUse = 0;
 
     const onlyRunSpecFilesIncludingAnyText = strArrayTransformer(fullConfig.onlyRunSpecFilesIncludingAnyText);
@@ -159,7 +162,7 @@ module.exports = (config = {}) => {
 
     const benchmarkObj = {
         cypressConfigFilepath,
-        specsDir,
+        specPhases,
         threadMode,
         additionalCypressEnvArgs,
     };
@@ -186,73 +189,94 @@ module.exports = (config = {}) => {
 
     let exitCode = 0;
 
-    let wordpressTestThreadDirs = fullConfig.singleThread ? [specsDir] : (() => {
-        if (threadMode === 1) {
-            return getDirectories(specsDir);
-        } else {
-            return getFilesRecursive(specsDir);
-        }
+    const wordpressConfigPhasesUnsorted = (() => {
+        let phases = [];
+
+        specPhases.forEach(dir => {
+            if (threadMode === 1) {
+                phases.push(getDirectories(dir));
+
+                if (getFiles(dir).length) {
+                    console.warn(orange(`WARNING: One or more files have been placed at the root of ${dir}. All spec files must be in subdirectories, otherwise they will not get tested when run with threadMode 1:\n${getFiles(dir).join('\n')}\n`));
+                }
+            } else {
+                phases.push(getFilesRecursive(dir));
+            }
+        });
+
+        // add a custom config to every thread to pass into the shell script
+        return phases.map(phase => {
+            return phase.length
+                ? phase.map((dir) => {
+                    return {
+                        ...cypressConfigObject,
+                        specPattern: onlyRunSpecFilesIncludingAnyText || onlyRunSpecFilesIncludingAllText
+                            ? getFilesRecursive(dir).filter(file => {
+                                const fileStr = fs.readFileSync(file).toString('utf8').toLowerCase();
+                                return (onlyRunSpecFilesIncludingAnyText || ['']).some(text => fileStr.includes(text))
+                                    && (onlyRunSpecFilesIncludingAllText || ['']).every(text => fileStr.includes(text))
+                            })
+                            : dir
+                    }
+                }).filter((thread) => thread.specPattern.length)
+                : null
+        }).filter((phase) => phase)
     })();
 
-    if (!wordpressTestThreadDirs.length) {
-        console.error(red('CRITICAL ERROR: No test directories were found!'));
+    if (!wordpressConfigPhasesUnsorted.length) {
+        console.error(red('CRITICAL ERROR: No test phases were found!'));
         process.exit(1);
     }
 
-    if (getFiles(specsDir).length) {
-        console.warn(orange(`WARNING: One or more files have been placed at the root of ${specsDir}. All spec files must be in subdirectories, otherwise they will not get tested when run in multithreaded mode:\n${getFiles(specsDir).join('\n')}\n`));
-    }
+    const wordpressConfigPhasesSorted = [];
 
     // raw test results are saved to this directory, which are then used to create the Allure report
     const allureResultsPath = path.join(reportDir, 'allure-results');
 
-    // add a custom config to every thread to pass into the shell script
-    const unsortedTestThreads = wordpressTestThreadDirs.map((dir) => {
-        return {
-            ...cypressConfigObject,
-            specPattern: onlyRunSpecFilesIncludingAnyText || onlyRunSpecFilesIncludingAllText
-                ? getFilesRecursive(dir).filter(file => {
-                    const fileStr = fs.readFileSync(file).toString('utf8').toLowerCase();
-                    return (onlyRunSpecFilesIncludingAnyText || ['']).some(text => fileStr.includes(text))
-                        && (onlyRunSpecFilesIncludingAllText || ['']).every(text => fileStr.includes(text))
-                })
-                : dir
-        }
-    }).filter((thread) => thread.specPattern.length);
-
     const savedThreadBenchmark = fs.existsSync(threadBenchmarkFilepath) ? JSON.parse(fs.readFileSync(threadBenchmarkFilepath)) : {};
 
-    let testThreads = [];
-
     if (threadOrder === 'benchmark' && savedThreadBenchmark[benchmarkId]) {
-        unsortedTestThreads.forEach(thread => {// bring any threads not present in the benchmark to the front
-            if (!savedThreadBenchmark[benchmarkId].order.includes(String(thread.specPattern))) {
-                testThreads.push(thread);
-            }
-        });
+        wordpressConfigPhasesUnsorted.forEach((phase, phaseIndex) => {
+            wordpressConfigPhasesSorted[phaseIndex] = [];
 
-        savedThreadBenchmark[benchmarkId].order.forEach(threadPath => {
-            testThreads.push(unsortedTestThreads.find(thread => String(thread.specPattern) === threadPath))
-        });
+            phase.forEach(thread => {// bring any threads not present in the benchmark to the front
+                if (!savedThreadBenchmark[benchmarkId].order.includes(String(thread.specPattern))) {
+                    wordpressConfigPhasesSorted[phaseIndex].push(thread);
+                }
+            });
 
-        testThreads = testThreads.filter((thread) => thread);
+            savedThreadBenchmark[benchmarkId].order.forEach(threadPath => {
+                wordpressConfigPhasesSorted[phaseIndex].push(
+                    phase.find(thread => String(thread.specPattern) === threadPath)
+                )
+            });
+
+            wordpressConfigPhasesSorted[phaseIndex] = wordpressConfigPhasesSorted[phaseIndex].filter((thread) => thread);
+        });
     } else {
-        testThreads = unsortedTestThreads;
+        wordpressConfigPhasesUnsorted.forEach((phase) => {
+            wordpressConfigPhasesSorted.push(phase);
+        });
     }
 
     const threadsMeta = {};
 
-    testThreads.forEach((thread, index) => {
-        threadsMeta[Number(index) + 1] = {
-            cypressConfig: JSON.stringify(thread),
-            path: String(thread.specPattern),
-            threadNo: Number(index) + 1,
-            status: 'success',
-            retries: 0,
-            perfResults: {},
-            logs: '',
-            printedLogs: false
-        }
+    wordpressConfigPhasesSorted.forEach((phase, phaseIndex) => {
+        phase.forEach((thread, threadIndex) => {
+            const threadNo = Number(Object.values(threadsMeta).length) + 1;
+
+            threadsMeta[threadNo] = {
+                cypressConfig: JSON.stringify(thread),
+                path: String(thread.specPattern),
+                phaseNo: Number(phaseIndex) + 1,
+                threadNo: threadNo,
+                status: 'success',
+                retries: 0,
+                perfResults: {},
+                logs: '',
+                printedLogs: false
+            }
+        });
     });
 
     if (onlyRunSpecFilesIncludingAnyText) {
@@ -267,9 +291,9 @@ module.exports = (config = {}) => {
         reportHeadNotes.push(`onlyRunSpecFilesIncludingAllText was set to ["${onlyRunSpecFilesIncludingAllText.join(', "')}"]. Therefore, only spec files that contained all strings from this array were processed.\n`);
     }
 
-    console.log(`${testThreads.length} thread${testThreads.length !== 1 ? 's' : ''} will be created to test spec files in the following order:\n${Object.values(testThreads).map(thread => thread.specPattern).join('\n')}\nA maximum of ${testThreads.length < maxCPUThreads ? testThreads.length : maxCPUThreads} threads will be used at any one time\n`);
+    console.log(`${Object.values(threadsMeta).length} thread${Object.values(threadsMeta).length !== 1 ? 's' : ''} will be created to test spec files in the following order:\n${Object.values(threadsMeta).map(thread => thread.path).join('\n')}\nA maximum of ${Object.values(threadsMeta).length < maxCPUThreads ? Object.values(threadsMeta).length : maxCPUThreads} threads will be used at any one time\n`);
 
-    if (!testThreads.length) {
+    if (!Object.values(threadsMeta).length) {
         console.error(red('CRITICAL ERROR: No spec files were found!'));
         process.exit(1);
     }
@@ -281,9 +305,28 @@ module.exports = (config = {}) => {
 
     let logQueue = [];
 
+    let phaseLock;
+
     (async () => {
         async function spawnThread(threadNo, logs = '', restartAttempts = 0, threadStarted = false) {
-            if (noOfThreadsInUse) {
+            const cypressProcess = spawn('bash', [
+                path.resolve(__dirname, 'shell.sh'),
+                // arguments for the shell script
+                allureResultsPath || '',// $1
+                cypressConfigFilepath || '',// $2
+                threadsMeta[threadNo].cypressConfig,// $3
+                threadNo,// $4
+                additionalCypressEnvArgs,// $5
+            ]);
+
+            threadsMeta[threadNo].pid = cypressProcess.pid;
+
+            if (phaseLock && phaseLock < threadsMeta[threadNo].phaseNo) {
+                kill(cypressProcess.pid);
+                return;
+            }
+
+            if (noOfThreadsInUse && logMode < 3) {
                 if (logMode === 1) {
                     console.log(`Thread #${threadNo} is now starting, and its logs will be printed when all preceding threads have completed.`);
                 } else if (logMode === 2) {
@@ -300,16 +343,6 @@ module.exports = (config = {}) => {
             noOfThreadsInUse++;
 
             let restartTests = false;
-
-            const cypressProcess = spawn('bash', [
-                path.resolve(__dirname, 'shell.sh'),
-                // arguments for the shell script
-                allureResultsPath || '',// $1
-                cypressConfigFilepath || '',// $2
-                threadsMeta[threadNo].cypressConfig,// $3
-                threadNo,// $4
-                additionalCypressEnvArgs,// $5
-            ]);
 
             const customWarning = (str) => {
                 console.warn(orange(str));
@@ -366,9 +399,8 @@ module.exports = (config = {}) => {
                     threadsMeta[threadNo].errorType = 'no-spec-files';
 
                     kill(cypressProcess.pid);
-                } else if (!threadStarted && log.includes('(Run Starting)') && !alwaysWaitForThreadDelay) {
+                } else if (!threadStarted && log.includes('(Run Starting)')) {
                     threadStarted = true;
-
                     threadDelayTout.clearTimeout();
                 }
             };
@@ -407,61 +439,70 @@ module.exports = (config = {}) => {
 
             logCheck(`Start of thread #${threadNo}:\n`);
 
+            const threadCompleteFunc = () => {
+                printAllLogs();
+
+                if (!threadsMeta[threadNo].logs.includes('All specs passed')) {
+                    phaseLock = threadsMeta[threadNo].phaseNo;
+
+                    const threadsFromPhasesAfterCurrent = Object.values(threadsMeta).filter(thread => thread.phaseNo > phaseLock);
+
+                    if (threadsFromPhasesAfterCurrent.length) {
+                        customWarning(orange(`Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately.`))
+
+                        threadsFromPhasesAfterCurrent.forEach(thread => {
+                            if (thread.pid) kill(thread.pid);
+                        });
+                    }
+                }
+
+                writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
+
+                // the thread might not have been marked as started if it never started properly!
+                if (!threadStarted) {
+                    threadStarted = true;
+                    threadDelayTout.clearTimeout();
+                }
+
+                noOfThreadsInUse--;
+                threadsMeta[threadNo].complete = true;
+                threadsMeta[threadNo].pid = false;
+                threadsMeta[threadNo].perfResults.secs = parseInt(
+                    (performance.now() - threadsMeta[threadNo].perfResults.startTime) / 1000
+                );
+            }
+
             return new Promise((resolve) => {
                 cypressProcess.on('close', async () => {
                     clearTimeout(inactivityTimer);
 
                     if (restartTests) {
-                        setTimeout(async () => {
-                            restartAttempts++;
-                            threadsMeta[threadNo].retries++;
+                        restartAttempts++;
+                        threadsMeta[threadNo].retries++;
 
-                            if (restartAttempts < maxThreadRestarts) {
-                                threadsMeta[threadNo].status = 'warn';
+                        if (restartAttempts < maxThreadRestarts) {
+                            threadsMeta[threadNo].status = 'warn';
 
-                                customWarning(`WARNING: Internal Cypress error in thread #${threadNo}! Will retry a maximum of ${maxThreadRestarts - restartAttempts} more time${(maxThreadRestarts - restartAttempts) !== 1 ? 's' : ''}.`);
+                            customWarning(`WARNING: Internal Cypress error in thread #${threadNo}! Will retry a maximum of ${maxThreadRestarts - restartAttempts} more time${(maxThreadRestarts - restartAttempts) !== 1 ? 's' : ''}.`);
 
-                                // delete any test results as they'll interfere with the next run
-                                if (fs.pathExistsSync(path.join(allureResultsPath, String(threadNo)))) {
-                                    fs.rmSync(path.join(allureResultsPath, String(threadNo)), { recursive: true, force: true });
-                                }
-
-                                await spawnThread(threadNo, logs, restartAttempts, threadStarted);
-                            } else {
-                                threadsMeta[threadNo].status = 'error';
-                                threadsMeta[threadNo].errorType = 'critical';
-                                printAllLogs();
-
-                                customWarning(`CRITICAL ERROR: Too many internal Cypress errors in thread #${threadNo}. Giving up after ${maxThreadRestarts} attempts!`);
-
-                                writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
-
-                                // the thread might not have been marked as started if it never started properly!
-                                threadStarted = true;
-                                noOfThreadsInUse--;
-                                threadDelayTout.clearTimeout();
-                                threadsMeta[threadNo].complete = true;
-                                threadsMeta[threadNo].perfResults.secs = parseInt(
-                                    (performance.now() - threadsMeta[threadNo].perfResults.startTime) / 1000
-                                );
-
-                                exitCode = 1;
+                            // delete any test results as they'll interfere with the next run
+                            if (fs.pathExistsSync(path.join(allureResultsPath, String(threadNo)))) {
+                                fs.rmSync(path.join(allureResultsPath, String(threadNo)), { recursive: true, force: true });
                             }
 
-                            resolve();
-                        }, 1000);
-                    } else {
-                        writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
-                        printAllLogs();
+                            await spawnThread(threadNo, logs, restartAttempts, threadStarted);
+                        } else {
+                            threadsMeta[threadNo].status = 'error';
+                            threadsMeta[threadNo].errorType = 'critical';
+                            exitCode = 1;
 
-                        // the thread might not have been marked as started if it never started properly!
-                        threadStarted = true;
-                        noOfThreadsInUse--;
-                        threadDelayTout.clearTimeout();
-                        threadsMeta[threadNo].complete = true;
-                        threadsMeta[threadNo].perfResults.secs = parseInt(
-                            (performance.now() - threadsMeta[threadNo].perfResults.startTime) / 1000
-                        );
+                            customWarning(`CRITICAL ERROR: Too many internal Cypress errors in thread #${threadNo}. Giving up after ${maxThreadRestarts} attempts!`);
+                            threadCompleteFunc();
+                        }
+
+                        resolve();
+                    } else {
+                        threadCompleteFunc();
 
                         resolve();
                     }
@@ -507,7 +548,7 @@ module.exports = (config = {}) => {
         }
 
         // the maximum delay before starting the next thread
-        // the delay will be interrupted as soon as the current Cypress has started running, unless alwaysWaitForThreadDelay is true
+        // the delay will be interrupted as soon as the current Cypress has started running
         const delay = (ms) => {
             return new Promise(resolve => threadDelayTout.setTimeout(() => {
                 if (noOfThreadsInUse < maxCPUThreads) {
@@ -520,7 +561,7 @@ module.exports = (config = {}) => {
             let threadsArr = []
             threadsArr.push(spawnThread(1));
 
-            if (testThreads.length > 1) {
+            if (Object.values(threadsMeta).length > 1) {
                 if (waitForFileExistFilepath) {
                     // decrease total delay by .5s as waitForFileExist will check for the file in intervals of .5s
                     await delay(threadDelay - 500 > 0 ? threadDelay - 500 : 0);
@@ -532,7 +573,7 @@ module.exports = (config = {}) => {
 
                 threadsArr.push(spawnThread(2));
 
-                for (const [index] of testThreads.slice(2).entries()) {
+                for (const [index] of Object.values(threadsMeta).slice(2).entries()) {
                     await delay(threadDelay);
                     threadsArr.push(spawnThread(Number(index) + 3));
                 }
@@ -634,7 +675,7 @@ module.exports = (config = {}) => {
                 Object.values(threadsMeta).forEach((thread) => {
                     const threadPath = thread.path;
 
-                    const threadId = testThreads.length > 9 ? String(thread.threadNo).padStart(2, '0') : thread.threadNo;
+                    const threadId = Object.values(threadsMeta).length > 9 ? String(thread.threadNo).padStart(2, '0') : thread.threadNo;
 
                     const shortThreadPath = threadPath.length > 60
                         ? `...${threadPath.substring(threadPath.length - 57).match(/\/(.*)$/)?.[0] || threadPath.substring(threadPath.length - 57)}`
