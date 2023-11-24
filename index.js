@@ -372,7 +372,7 @@ module.exports = (config = {}) => {
                 console.log(`Thread #${threadNo} is now starting...`);
             }
 
-            threadsMeta[threadNo].perfResults.startTime = performance.now();
+            if(!threadsMeta[threadNo].retries) threadsMeta[threadNo].perfResults.startTime = performance.now();
 
             const customWarning = (str) => {
                 console.warn(orange(str));
