@@ -206,11 +206,11 @@ module.exports = (config = {}) => {
 
     const cypressConfigPhasesUnsorted = phases.map(phase => {
         const specs = (() => {
-            if (threadMode === 1) {
+            if (threadMode === 2) {
                 const arr = getDirectories(phase.specsDir);
 
                 if (getFiles(phase.specsDir).length) {
-                    console.warn(orange(`WARNING: One or more files have been placed at the root of ${dir}. All spec files must be in subdirectories, otherwise they will not get tested when run with threadMode 1:\n${getFiles(dir).join('\n')}\n`));
+                    console.warn(orange(`WARNING: One or more files have been placed at the root of ${dir}. All spec files must be in subdirectories, otherwise they will not get tested when run with threadMode 2:\n${getFiles(dir).join('\n')}\n`));
                 }
 
                 return arr;
@@ -271,15 +271,21 @@ module.exports = (config = {}) => {
 
     const threadsMeta = {};
 
+    const initLogs = [];
+
     cypressConfigPhasesSorted.forEach((phase, phaseIndex) => {
+        const phaseNo = Number(phaseIndex) + 1;
+        initLogs.push(`[PHASE ${phaseNo}]`)
+
         phase.forEach((thread) => {
             const threadNo = Number(Object.values(threadsMeta).length) + 1;
+            const path = String(thread.specPattern);
 
             threadsMeta[threadNo] = {
                 cypressConfigFilepath: phases[phaseIndex].cypressConfigFilepath,
                 cypressConfig: JSON.stringify(thread),
-                path: String(thread.specPattern),
-                phaseNo: Number(phaseIndex) + 1,
+                path,
+                phaseNo,
                 threadNo: threadNo,
                 status: 'success',
                 retries: 0,
@@ -289,22 +295,33 @@ module.exports = (config = {}) => {
                 additionalCypressEnvArgs: phases[phaseIndex].additionalCypressEnvArgs,
             }
 
-            if (phases[phaseIndex].onlyRunSpecFilesIncludingAnyText) {
-                console.log(`NOTE: onlyRunSpecFilesIncludingAnyText is set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAnyText.join(', "')}"]. Therefore, only spec files that contain any strings from this array will be processed.\n`);
-
-                reportHeadNotes.push(`onlyRunSpecFilesIncludingAnyText was set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAnyText.join(', "')}"]. Therefore, only spec files that contained any strings from this array were processed.\n`);
-            }
-
-            if (phases[phaseIndex].onlyRunSpecFilesIncludingAllText) {
-                console.log(`NOTE: onlyRunSpecFilesIncludingAllText is set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAllText.join(', "')}"]. Therefore, only spec files that contain all strings from this array will be processed.\n`)
-
-                reportHeadNotes.push(`onlyRunSpecFilesIncludingAllText was set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAllText.join(', "')}"]. Therefore, only spec files that contained all strings from this array were processed.\n`);
-            }
-
+            initLogs[initLogs.length - 1] += `\nThread ${threadNo}: "${path}" ${!savedThreadBenchmark[benchmarkId]?.order.includes(path) ? ' (not found in benchmark)' : ''}`;
         });
+
+        if (phases[phaseIndex].onlyRunSpecFilesIncludingAnyText) {
+            const note = `NOTE: For phase #${phaseNo}, onlyRunSpecFilesIncludingAnyText is set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAnyText.join('", "')}"]. Therefore, only spec files that contain any strings from this array will be processed.`;
+
+            initLogs.push(note);
+            reportHeadNotes.push(note);
+        }
+
+        if (phases[phaseIndex].onlyRunSpecFilesIncludingAllText) {
+            const note = `NOTE: For phase #${phaseNo}, onlyRunSpecFilesIncludingAllText is set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAllText.join('", "')}"]. Therefore, only spec files that contain all strings from this array will be processed.`;
+
+            initLogs.push(note);
+            reportHeadNotes.push(note);
+        }
     });
 
-    console.log(`${Object.values(threadsMeta).length} thread${Object.values(threadsMeta).length !== 1 ? 's' : ''} will be created to test spec files in the following order:\n${Object.values(threadsMeta).map(thread => `[phase ${thread.phaseNo}] ${thread.path}`).join('\n')}\nA maximum of ${Object.values(threadsMeta).length < maxConcurrentThreads ? Object.values(threadsMeta).length : maxConcurrentThreads} threads will be used at any one time\n`);
+    initLogs.unshift(`${Object.values(threadsMeta).length} thread${Object.values(threadsMeta).length !== 1 ? 's' : ''} will be created to test the following spec files in the following order:`)
+
+    if (cypressConfigPhasesSorted.length > 1) {
+        initLogs.push('Should tests in any phase fail, all threads in the following phases will stop running immediately.');
+    }
+
+    initLogs.push(`A maximum of ${Object.values(threadsMeta).length < maxConcurrentThreads ? Object.values(threadsMeta).length : maxConcurrentThreads} threads will be used at any one time.`);
+
+    console.log(`${initLogs.join('\n\n')}\n`)
 
     if (!Object.values(threadsMeta).length) {
         console.error(red('CRITICAL ERROR: No spec files were found!'));
@@ -334,7 +351,7 @@ module.exports = (config = {}) => {
 
             threadsMeta[threadNo].pid = cypressProcess.pid;
 
-            noOfThreadsInUse++;
+            if(!threadsMeta[threadNo].retries) noOfThreadsInUse++;
 
             let restartTests = false;
 
@@ -343,7 +360,7 @@ module.exports = (config = {}) => {
                 return;
             }
 
-            if (noOfThreadsInUse && logMode < 3) {
+            if (noOfThreadsInUse > 1 && logMode < 3) {
                 if (logMode === 1) {
                     console.log(`Thread #${threadNo} is now starting, and its logs will be printed when all preceding threads have completed.`);
                 } else if (logMode === 2) {
@@ -403,6 +420,7 @@ module.exports = (config = {}) => {
                     || log.includes('we are skipping the remaining tests in the current suite')
                     || log.includes('Cypress could not associate this error to any specific test.')
                     || log.includes('Cypress: Fatal IO error')
+                    || log.includes('Webpack Compilation Error')
                 ) {
                     restartTests = true;
 
@@ -467,7 +485,7 @@ module.exports = (config = {}) => {
                         customWarning(orange(`Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately.`))
 
                         threadsFromPhasesAfterCurrent.forEach((thread) => {
-                            if (!threadsMeta[threadNo].logs.includes('All specs passed')) {
+                            if (!threadsMeta[thread.threadNo].logs.includes('All specs passed')) {
                                 threadsMeta[thread.threadNo].status = 'error';
                                 threadsMeta[thread.threadNo].errorType = 'critical';
                                 threadsMeta[thread.threadNo].perfResults.secs = undefined;
@@ -688,89 +706,99 @@ module.exports = (config = {}) => {
             if (saveThreadBenchmark) {
                 benchmarkObj.order = Object.values(threadsMeta).filter(thread => thread.perfResults.secs).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path);
 
-                fs.writeFileSync(threadBenchmarkFilepath, JSON.stringify({
-                    ...savedThreadBenchmark,
-                    [benchmarkId]: benchmarkObj,
-                }, null, 4));
+                if (JSON.stringify(savedThreadBenchmark[benchmarkId]) !== JSON.stringify(benchmarkObj)) {
+                    console.log('Updating thread order...');
+
+                    fs.writeFileSync(threadBenchmarkFilepath, JSON.stringify({
+                        ...savedThreadBenchmark,
+                        [benchmarkId]: benchmarkObj,
+                    }, null, 4));
+                }
             }
 
             // a visual representation of how each thread performed, to show where any bottlenecks lie
             const generateThreadBars = (timeOfLongestThread) => {
                 let str = '';
 
-                Object.values(threadsMeta).forEach((thread) => {
-                    const threadPath = thread.path;
+                cypressConfigPhasesSorted.forEach((_, phaseIndex) => {
+                    const phaseNo = Number(phaseIndex) + 1;
 
-                    const threadId = Object.values(threadsMeta).length > 9 ? String(thread.threadNo).padStart(2, '0') : thread.threadNo;
+                    str += `[PHASE ${phaseNo}]\n\n`;
 
-                    const shortThreadPath = threadPath.length > 60
-                        ? `...${threadPath.substring(threadPath.length - 57).match(/\/(.*)$/)?.[0] || threadPath.substring(threadPath.length - 57)}`
-                        : threadPath;
+                    Object.values(threadsMeta).filter(thread => thread.phaseNo === phaseNo).forEach((thread) => {
+                        const threadPath = thread.path;
 
-                    threadsMeta[thread.threadNo].heading = [`Thread #${threadId} [${shortThreadPath}]`];
+                        const threadId = Object.values(threadsMeta).length > 9 ? String(thread.threadNo).padStart(2, '0') : thread.threadNo;
 
-                    str += `Thread #${threadId} [${threadPath}]\n`;
+                        const shortThreadPath = threadPath.length > 60
+                            ? `...${threadPath.substring(threadPath.length - 57).match(/\/(.*)$/)?.[0] || threadPath.substring(threadPath.length - 57)}`
+                            : threadPath;
 
-                    if (threadsMeta[thread.threadNo].errorType === 'no-spec-files') {
-                        const err = 'ERROR: No spec files found!';
-                        threadsMeta[thread.threadNo].heading.push(err);
-                        threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${thread.threadNo}`;
-                        str += `${err}\n\n`;
-                        exitCode = 1;
-                    } else if (threadsMeta[thread.threadNo].errorType === 'critical') {
-                        const err = 'CRITICAL ERROR: Thread did not complete!';
-                        threadsMeta[thread.threadNo].status = 'error';
-                        threadsMeta[thread.threadNo].errorType = 'critical';
-                        threadsMeta[thread.threadNo].heading.push(err);
-                        str += `${err}\n\n`;
-                        exitCode = 1;
-                    }
+                        threadsMeta[thread.threadNo].heading = [`Thread #${threadId} [${shortThreadPath}]`];
 
-                    const percentageOfTotal = (
-                        threadsMeta[thread.threadNo].perfResults.secs / timeOfLongestThread
-                    ) * 100;
+                        str += `Thread #${threadId} [${threadPath}]\n`;
 
-                    if (isNaN(percentageOfTotal)) {
-                        return;
-                    }
-
-                    const percentageBar = `${Array.from({ length: Math.round(percentageOfTotal / 2) }, () => '█').concat(
-                        Array.from({ length: 50 - Math.round(percentageOfTotal / 2) }, () => '░'),
-                    ).join('')}`;
-
-                    // log if any tests in the thread failed/retried
-                    const reportFailedTests = (obj) => {
-                        const result = [];
-
-                        if (Object.entries(obj).length) {
-                            threadsMeta[thread.threadNo].status = 'warn';
-
-                            const counts = Object.values(obj).reduce((acc, curr) => {
-                                acc[curr] = (acc[curr] || 0) + 1;
-                                return acc;
-                            }, {});
-
-                            Object.keys(counts).sort((a, b) => b - a).forEach((num) => {
-                                result.push(`${counts[num]} test${counts[num] > 1 ? 's' : ''} failed ${num} time${num > 1 ? 's' : ''}`);
-                            });
+                        if (threadsMeta[thread.threadNo].errorType === 'no-spec-files') {
+                            const err = 'ERROR: No spec files found!';
+                            threadsMeta[thread.threadNo].heading.push(err);
+                            threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${thread.threadNo}`;
+                            str += `${err}\n\n`;
+                            exitCode = 1;
+                        } else if (threadsMeta[thread.threadNo].errorType === 'critical') {
+                            const err = 'CRITICAL ERROR: Thread did not complete!';
+                            threadsMeta[thread.threadNo].status = 'error';
+                            threadsMeta[thread.threadNo].errorType = 'critical';
+                            threadsMeta[thread.threadNo].heading.push(err);
+                            str += `${err}\n\n`;
+                            exitCode = 1;
                         }
 
-                        if (threadsMeta[thread.threadNo].retries) {
-                            threadsMeta[thread.threadNo].status = 'warn';
-                            result.push(`the thread needed restarting ${threadsMeta[thread.threadNo].retries} time${threadsMeta[thread.threadNo].retries === 1 ? '' : 's'}`);
+                        const percentageOfTotal = (
+                            threadsMeta[thread.threadNo].perfResults.secs / timeOfLongestThread
+                        ) * 100;
+
+                        if (isNaN(percentageOfTotal)) {
+                            return;
                         }
 
-                        if (!result.length) {
-                            return '';
-                        }
+                        const percentageBar = `${Array.from({ length: Math.round(percentageOfTotal / 2) }, () => '█').concat(
+                            Array.from({ length: 50 - Math.round(percentageOfTotal / 2) }, () => '░'),
+                        ).join('')}`;
 
-                        threadsMeta[thread.threadNo].heading.push(`WARNING: ${arrToNaturalStr(result)}`);
-                        threadsMeta[thread.threadNo].summary = `WARNING: Thread #${thread.threadNo}: ${arrToNaturalStr(result)}`;
+                        // log if any tests in the thread failed/retried
+                        const reportFailedTests = (obj) => {
+                            const result = [];
 
-                        return ` (WARNING: ${arrToNaturalStr(result)})`;
-                    };
+                            if (Object.entries(obj).length) {
+                                threadsMeta[thread.threadNo].status = 'warn';
 
-                    str += `${percentageBar} ${percentageOfTotal.toFixed(2)}% (${threadsMeta[thread.threadNo].perfResults.naturalString})${reportFailedTests(threadsMeta[thread.threadNo].perfResults.failedTests)}\n\n`;
+                                const counts = Object.values(obj).reduce((acc, curr) => {
+                                    acc[curr] = (acc[curr] || 0) + 1;
+                                    return acc;
+                                }, {});
+
+                                Object.keys(counts).sort((a, b) => b - a).forEach((num) => {
+                                    result.push(`${counts[num]} test${counts[num] > 1 ? 's' : ''} failed ${num} time${num > 1 ? 's' : ''}`);
+                                });
+                            }
+
+                            if (threadsMeta[thread.threadNo].retries) {
+                                threadsMeta[thread.threadNo].status = 'warn';
+                                result.push(`the thread needed restarting ${threadsMeta[thread.threadNo].retries} time${threadsMeta[thread.threadNo].retries === 1 ? '' : 's'}`);
+                            }
+
+                            if (!result.length) {
+                                return '';
+                            }
+
+                            threadsMeta[thread.threadNo].heading.push(`WARNING: ${arrToNaturalStr(result)}`);
+                            threadsMeta[thread.threadNo].summary = `WARNING: Thread #${thread.threadNo}: ${arrToNaturalStr(result)}`;
+
+                            return ` (WARNING: ${arrToNaturalStr(result)})`;
+                        };
+
+                        str += `${percentageBar} ${percentageOfTotal.toFixed(2)}% (${threadsMeta[thread.threadNo].perfResults.naturalString})${reportFailedTests(threadsMeta[thread.threadNo].perfResults.failedTests)}\n\n`;
+                    });
                 });
 
                 return str;
@@ -867,7 +895,7 @@ module.exports = (config = {}) => {
                 ${criticalErrorThreads.length ? `
                 <div class="cmr-error">
                     <h2>Cypress Multithreaded Runner${allureReportHeading} [CRITICAL ERRORS - PLEASE READ]</h2>
-                    Be advised! This Allure report doesn't tell the full story, as <strong>thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete! Therefore, one or more spec files may have not been fully tested! Scroll down to read the full logs from the separate threads.
+                    Be advised! This Allure report doesn't tell the full story. <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete! Therefore, one or more spec files may have not been fully tested! ${phaseLock ? `One or more tests in phase #${phaseLock} failed, therefore any tests from subsequent phases did not complete. ` : ''}Scroll down to read the full logs from the separate threads.
                 </div>` : ''}
                 ${minorErrorThreads.length ? `
                 <div class="cmr-error">
