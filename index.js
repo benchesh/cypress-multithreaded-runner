@@ -19,7 +19,7 @@ const { argv } = yargs(hideBin(process.argv))
     .number(['maxThreadRestarts', 'threadDelay', 'threadTimeout', 'maxConcurrentThreads',
         'waitForFileExist.minSize', 'waitForFileExist.timeout'
     ])
-    .boolean(['openAllure', 'combineAllure', 'hostAllure',
+    .boolean(['orderThreadsByBenchmark', 'openAllure', 'combineAllure', 'hostAllure',
         'waitForFileExist.deleteAfterCompletion', 'waitForFileExist.stopWaitingWhenFirstThreadCompletes'
     ])
     .alias('open', 'openAllure')
@@ -145,7 +145,7 @@ module.exports = (config = {}) => {
     const logMode = fullConfig.logMode || 1;
     const allureReportHeading = fullConfig.allureReportHeading ? `: ${fullConfig.allureReportHeading}` : '';
     const threadMode = fullConfig.threadMode || 1;
-    const threadOrder = fullConfig.threadOrder ?? 'benchmark';
+    const orderThreadsByBenchmark = fullConfig.orderThreadsByBenchmark ?? true;
     const saveThreadBenchmark = fullConfig.saveThreadBenchmark ?? true;
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
     const benchmarkDescription = fullConfig.benchmarkDescription ?? null;
@@ -262,7 +262,9 @@ module.exports = (config = {}) => {
                         : [spec];
 
                     if (specFiles) {
-                        return specsList.filter(spec => specFiles.includes(spec));
+                        return specsList.filter(spec => specFiles.some(
+                            specFile => path.resolve(specFile) === path.resolve(spec)
+                        ));
                     }
 
                     return specsList;
@@ -290,7 +292,7 @@ module.exports = (config = {}) => {
     })() : {};
 
 
-    if (threadOrder === 'benchmark' && savedThreadBenchmark[benchmarkId]) {
+    if (orderThreadsByBenchmark && savedThreadBenchmark[benchmarkId]) {
         cypressConfigPhasesUnsorted.forEach((phase, phaseIndex) => {
             cypressConfigPhasesSorted[phaseIndex] = [];
 
