@@ -156,6 +156,16 @@ module.exports = (config = {}) => {
     const maxConcurrentThreads = fullConfig.maxConcurrentThreads || Math.ceil(require('os').cpus().length / 2);
     let noOfThreadsInUse = 0;
 
+    const onlyPhaseNo = fullConfig.onlyPhaseNo;
+    const startingPhaseNo = fullConfig.startingPhaseNo;
+    const endingPhaseNo = fullConfig.endingPhaseNo;
+
+    const userSkippingPhase = (phaseNo) => {
+        return onlyPhaseNo && onlyPhaseNo !== phaseNo
+            || startingPhaseNo > phaseNo
+            || endingPhaseNo < phaseNo
+    }
+
     const phases = fullConfig.phases.map(phase => {
         return {
             ...fullConfig.phaseDefaults,
@@ -188,6 +198,9 @@ module.exports = (config = {}) => {
         benchmarkDescription,
         threadMode,
         specFiles,
+        onlyPhaseNo,
+        startingPhaseNo,
+        endingPhaseNo,
         phases: phases.map(phase => {
             return filterObj({
                 cypressConfigFilepath: phase.cypressConfigFilepath,
@@ -311,6 +324,12 @@ module.exports = (config = {}) => {
 
         if (!phase.length) {
             initLogs[initLogs.length - 1] += ' (No spec files found, skipping)';
+            return;
+        }
+
+        if (userSkippingPhase(phaseNo)) {
+            initLogs[initLogs.length - 1] += ' (Skipping phase)';
+            return;
         }
 
         phase.forEach((thread) => {
@@ -352,7 +371,7 @@ module.exports = (config = {}) => {
     initLogs.unshift(`${Object.values(threadsMeta).length} thread${Object.values(threadsMeta).length !== 1 ? 's' : ''} will be created to test the following spec files in the following order:`)
 
     if (cypressConfigPhasesSorted.length > 1) {
-        initLogs.push('Should tests in any phase fail, all phases that follow it will stop immediately.');
+        initLogs.push('Should tests in any phase fail, all threads from subsequent phases will stop immediately.');
     }
 
     initLogs.push(`A maximum of ${Object.values(threadsMeta).length < maxConcurrentThreads ? Object.values(threadsMeta).length : maxConcurrentThreads} threads will be used at any one time.\nThis code is executing on a machine with ${require('os').cpus().length} logical CPU threads.`);
@@ -746,15 +765,21 @@ module.exports = (config = {}) => {
             if (saveThreadBenchmark) {
                 benchmarkObj.order = Object.values(threadsMeta).filter(thread => thread.perfResults.secs).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path);
 
-                if (JSON.stringify(savedThreadBenchmark[benchmarkId]) !== JSON.stringify(benchmarkObj)) {
-                    console.log(`Updating thread order:\n["${benchmarkObj.order.join('", "')}"]`);
-
-                    fs.writeFileSync(threadBenchmarkFilepath, JSON.stringify({
-                        ...savedThreadBenchmark,
-                        [benchmarkId]: benchmarkObj,
-                    }, null, 4));
+                if (benchmarkObj.order.length < 2) {
+                    console.log(orange('The thread benchmark will not be updated because two or more threads are required to determine the optimal order!'));
+                } else if (Object.values(threadsMeta).length !== benchmarkObj.order.length) {
+                    console.log(orange('The thread benchmark will not be updated because one or more phases did not complete!'));
                 } else {
-                    console.log('The results of the thread benchmark are identical to the records already saved, so the thread order doesn\'t need changing!');
+                    if (JSON.stringify(savedThreadBenchmark[benchmarkId]) !== JSON.stringify(benchmarkObj)) {
+                        console.log(`Updating thread order:\n["${benchmarkObj.order.join('", "')}"]`);
+
+                        fs.writeFileSync(threadBenchmarkFilepath, JSON.stringify({
+                            ...savedThreadBenchmark,
+                            [benchmarkId]: benchmarkObj,
+                        }, null, 4));
+                    } else {
+                        console.log('The results of the thread benchmark are identical to the records already saved, so the thread order doesn\'t need changing!');
+                    }
                 }
             }
 
@@ -769,7 +794,9 @@ module.exports = (config = {}) => {
 
                     const phaseThreads = Object.values(threadsMeta).filter(thread => thread.phaseNo === phaseNo);
 
-                    if (!phaseThreads.length) {
+                    if (userSkippingPhase(phaseNo)) {
+                        str += 'Phase skipped!\n\n';
+                    } else if (!phaseThreads.length) {
                         str += 'No spec files were found!\n\n';
                     }
 
@@ -943,7 +970,7 @@ module.exports = (config = {}) => {
                 ${criticalErrorThreads.length ? `
                 <div class="cmr-error">
                     <h2>Cypress Multithreaded Runner${allureReportHeading} [CRITICAL ERRORS - PLEASE READ]</h2>
-                    Be advised! This Allure report doesn't tell the full story. <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete! Therefore, one or more spec files may have not been fully tested! ${phaseLock ? `One or more tests in phase #${phaseLock} failed, therefore any tests from subsequent phases did not complete. ` : ''}Scroll down to read the full logs from the separate threads.
+                    Be advised! This Allure report doesn't tell the full story. ${phaseLock ? `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>` : ''}<strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete! Therefore, one or more spec files may have not been fully tested! Scroll down to read the full logs from the separate threads.
                 </div>` : ''}
                 ${minorErrorThreads.length ? `
                 <div class="cmr-error">
