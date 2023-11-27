@@ -10,8 +10,10 @@ const kill = require('tree-kill');
 
 const path = require('path');
 
+const noConsoleColours = process.env.NO_COLOR === 1;
+
 const { argv } = yargs(hideBin(process.argv))
-    .array(['ignoreCliOverrides'])
+    .array(['ignoreCliOverrides', 'phases', 'phaseDefaults.onlyRunSpecFilesIncludingAnyText', 'phaseDefaults.onlyRunSpecFilesIncludingAllText', 'specFiles'])
     .choices('logMode', [1, 2, 3, 4])
     .choices('threadMode', [1, 2])
     .number(['maxThreadRestarts', 'threadDelay', 'threadTimeout', 'maxConcurrentThreads',
@@ -32,9 +34,9 @@ const { argv } = yargs(hideBin(process.argv))
 const mkdirSyncIfMissing = (s) => !fs.existsSync(s) && fs.mkdirSync(s, { recursive: true });
 
 //for console logs
-const green = (s) => `\x1b[32m${s}\x1b[0m`;
-const orange = (s) => `\x1b[33m${s}\x1b[0m`;
-const red = (s) => `\x1b[31m${s}\x1b[0m`;
+const green = (s) => noConsoleColours ? s : `\x1b[32m${s}\x1b[0m`;
+const orange = (s) => noConsoleColours ? s : `\x1b[33m${s}\x1b[0m`;
+const red = (s) => noConsoleColours ? s : `\x1b[31m${s}\x1b[0m`;
 
 /**
  * Write to a file. Will create the file & destination folder if they don't exist
@@ -114,6 +116,17 @@ let SuperTout = class {
     };
 };
 
+// Remove falsy values from an object
+const filterObj = (obj) => {
+    return Object.keys(obj).reduce((acc, key) => {
+        if (obj[key]) {
+            acc[key] = obj[key]
+        }
+
+        return acc
+    }, {})
+}
+
 module.exports = (config = {}) => {
     const fullConfig = { ...config, ...argv };
 
@@ -133,8 +146,10 @@ module.exports = (config = {}) => {
     const allureReportHeading = fullConfig.allureReportHeading ? `: ${fullConfig.allureReportHeading}` : '';
     const threadMode = fullConfig.threadMode || 1;
     const threadOrder = fullConfig.threadOrder ?? 'benchmark';
-    const saveThreadBenchmark = fullConfig.saveThreadBenchmark || true;
+    const saveThreadBenchmark = fullConfig.saveThreadBenchmark ?? true;
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
+    const benchmarkDescription = fullConfig.benchmarkDescription ?? null;
+    const specFiles = fullConfig.specFiles ?? null;
 
     const reportHeadNotes = [];
 
@@ -169,18 +184,20 @@ module.exports = (config = {}) => {
         }
     });
 
-    const benchmarkObj = {
+    const benchmarkObj = filterObj({
+        benchmarkDescription,
         threadMode,
+        specFiles,
         phases: phases.map(phase => {
-            return {
+            return filterObj({
                 cypressConfigFilepath: phase.cypressConfigFilepath,
                 specsDir: phase.specsDir,
                 onlyRunSpecFilesIncludingAnyText: phase.onlyRunSpecFilesIncludingAnyText,
                 onlyRunSpecFilesIncludingAllText: phase.onlyRunSpecFilesIncludingAllText,
                 additionalCypressEnvArgs: phase.additionalCypressEnvArgs,
-            }
+            })
         }),
-    };
+    });
 
     const benchmarkId = btoa(JSON.stringify(benchmarkObj));
 
@@ -206,11 +223,11 @@ module.exports = (config = {}) => {
 
     const cypressConfigPhasesUnsorted = phases.map(phase => {
         const specs = (() => {
-            if (threadMode === 2) {
+            if (threadMode === 2 && !specFiles) {
                 const arr = getDirectories(phase.specsDir);
 
                 if (getFiles(phase.specsDir).length) {
-                    console.warn(orange(`WARNING: One or more files have been placed at the root of ${dir}. All spec files must be in subdirectories, otherwise they will not get tested when run with threadMode 2:\n${getFiles(dir).join('\n')}\n`));
+                    console.warn(orange(`WARNING: One or more files have been placed at the root of ${phase.specsDir}. All spec files must be in subdirectories, otherwise they will not get tested when run with threadMode 2:\n${getFiles(phase.specsDir).join('\n')}\n`));
                 }
 
                 return arr;
@@ -222,13 +239,21 @@ module.exports = (config = {}) => {
         return specs.map((spec) => {
             return {
                 ...phase.cypressConfigObject, // add a custom config to every thread to pass into the shell script
-                specPattern: phase.onlyRunSpecFilesIncludingAnyText || phase.onlyRunSpecFilesIncludingAllText
-                    ? getFilesRecursive(spec).filter(file => {
-                        const fileStr = fs.readFileSync(file).toString('utf8').toLowerCase();
-                        return (phase.onlyRunSpecFilesIncludingAnyText || ['']).some(text => fileStr.includes(text))
-                            && (phase.onlyRunSpecFilesIncludingAllText || ['']).every(text => fileStr.includes(text))
-                    })
-                    : spec
+                specPattern: (() => {
+                    const specsList = phase.onlyRunSpecFilesIncludingAnyText || phase.onlyRunSpecFilesIncludingAllText
+                        ? getFilesRecursive(spec).filter(file => {
+                            const fileStr = fs.readFileSync(file).toString('utf8').toLowerCase();
+                            return (phase.onlyRunSpecFilesIncludingAnyText || ['']).some(text => fileStr.includes(text))
+                                && (phase.onlyRunSpecFilesIncludingAllText || ['']).every(text => fileStr.includes(text))
+                        })
+                        : [spec];
+
+                    if (specFiles) {
+                        return specsList.filter(spec => specFiles.includes(spec));
+                    }
+
+                    return specsList;
+                })()
             }
         }).filter((thread) => thread.specPattern.length)
     }).filter((phase) => phase)
@@ -243,7 +268,14 @@ module.exports = (config = {}) => {
     // raw test results are saved to this directory, which are then used to create the Allure report
     const allureResultsPath = path.join(reportDir, 'allure-results');
 
-    const savedThreadBenchmark = fs.existsSync(threadBenchmarkFilepath) ? JSON.parse(fs.readFileSync(threadBenchmarkFilepath)) : {};
+    const savedThreadBenchmark = fs.existsSync(threadBenchmarkFilepath) ? (() => {
+        try {
+            return JSON.parse(fs.readFileSync(threadBenchmarkFilepath));
+        } catch (err) {
+            return {};
+        }
+    })() : {};
+
 
     if (threadOrder === 'benchmark' && savedThreadBenchmark[benchmarkId]) {
         cypressConfigPhasesUnsorted.forEach((phase, phaseIndex) => {
@@ -277,6 +309,10 @@ module.exports = (config = {}) => {
         const phaseNo = Number(phaseIndex) + 1;
         initLogs.push(`[PHASE ${phaseNo}]`)
 
+        if (!phase.length) {
+            initLogs[initLogs.length - 1] += ' (No spec files found, skipping)';
+        }
+
         phase.forEach((thread) => {
             const threadNo = Number(Object.values(threadsMeta).length) + 1;
             const path = String(thread.specPattern);
@@ -295,7 +331,7 @@ module.exports = (config = {}) => {
                 additionalCypressEnvArgs: phases[phaseIndex].additionalCypressEnvArgs,
             }
 
-            initLogs[initLogs.length - 1] += `\nThread ${threadNo}: "${path}" ${!savedThreadBenchmark[benchmarkId]?.order.includes(path) ? ' (not found in benchmark)' : ''}`;
+            initLogs[initLogs.length - 1] += `\nThread ${threadNo}: "${path}"${!savedThreadBenchmark[benchmarkId]?.order.includes(path) ? ' (not found in benchmark)' : ''}`;
         });
 
         if (phases[phaseIndex].onlyRunSpecFilesIncludingAnyText) {
@@ -316,10 +352,14 @@ module.exports = (config = {}) => {
     initLogs.unshift(`${Object.values(threadsMeta).length} thread${Object.values(threadsMeta).length !== 1 ? 's' : ''} will be created to test the following spec files in the following order:`)
 
     if (cypressConfigPhasesSorted.length > 1) {
-        initLogs.push('Should tests in any phase fail, all threads in the following phases will stop running immediately.');
+        initLogs.push('Should tests in any phase fail, all phases that follow it will stop immediately.');
     }
 
-    initLogs.push(`A maximum of ${Object.values(threadsMeta).length < maxConcurrentThreads ? Object.values(threadsMeta).length : maxConcurrentThreads} threads will be used at any one time.`);
+    initLogs.push(`A maximum of ${Object.values(threadsMeta).length < maxConcurrentThreads ? Object.values(threadsMeta).length : maxConcurrentThreads} threads will be used at any one time.\nThis code is executing on a machine with ${require('os').cpus().length} logical CPU threads.`);
+
+    if (!saveThreadBenchmark) {
+        initLogs.push(orange('saveThreadBenchmark is set to false, therefore the benchmark file will not be updated when this run completes.'));
+    }
 
     console.log(`${initLogs.join('\n\n')}\n`)
 
@@ -351,16 +391,16 @@ module.exports = (config = {}) => {
 
             threadsMeta[threadNo].pid = cypressProcess.pid;
 
-            if(!threadsMeta[threadNo].retries) noOfThreadsInUse++;
+            if (!threadsMeta[threadNo].retries) noOfThreadsInUse++;
 
             let restartTests = false;
 
-            if (phaseLock && phaseLock < threadsMeta[threadNo].phaseNo) {//hack this is daft but it works
+            if (phaseLock && phaseLock < threadsMeta[threadNo].phaseNo) {//hack this is daft but it works. Prevent thread from running if a thread from a previous phase has already failed
                 kill(cypressProcess.pid);
                 return;
             }
 
-            if (noOfThreadsInUse > 1 && logMode < 3) {
+            if (noOfThreadsInUse > 1 && logMode < 3 && !threadsMeta[threadNo].printedLogs) {
                 if (logMode === 1) {
                     console.log(`Thread #${threadNo} is now starting, and its logs will be printed when all preceding threads have completed.`);
                 } else if (logMode === 2) {
@@ -372,7 +412,7 @@ module.exports = (config = {}) => {
                 console.log(`Thread #${threadNo} is now starting...`);
             }
 
-            if(!threadsMeta[threadNo].retries) threadsMeta[threadNo].perfResults.startTime = performance.now();
+            if (!threadsMeta[threadNo].retries) threadsMeta[threadNo].perfResults.startTime = performance.now();
 
             const customWarning = (str) => {
                 console.warn(orange(str));
@@ -644,7 +684,7 @@ module.exports = (config = {}) => {
                 const minutes = Math.floor(seconds / 60);
                 const remainingSeconds = seconds - (minutes * 60);
 
-                return `${minutes ? `${minutes} minutes, ` : ''}${remainingSeconds} seconds`;
+                return `${minutes ? `${minutes} minute${minutes !== 1 ? 's' : ''}, ` : ''}${remainingSeconds} second${seconds !== 1 ? 's' : ''}`;
             };
 
             let longestThread = { secs: -1 };
@@ -707,12 +747,14 @@ module.exports = (config = {}) => {
                 benchmarkObj.order = Object.values(threadsMeta).filter(thread => thread.perfResults.secs).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path);
 
                 if (JSON.stringify(savedThreadBenchmark[benchmarkId]) !== JSON.stringify(benchmarkObj)) {
-                    console.log('Updating thread order...');
+                    console.log(`Updating thread order:\n["${benchmarkObj.order.join('", "')}"]`);
 
                     fs.writeFileSync(threadBenchmarkFilepath, JSON.stringify({
                         ...savedThreadBenchmark,
                         [benchmarkId]: benchmarkObj,
                     }, null, 4));
+                } else {
+                    console.log('The results of the thread benchmark are identical to the records already saved, so the thread order doesn\'t need changing!');
                 }
             }
 
@@ -725,7 +767,13 @@ module.exports = (config = {}) => {
 
                     str += `[PHASE ${phaseNo}]\n\n`;
 
-                    Object.values(threadsMeta).filter(thread => thread.phaseNo === phaseNo).forEach((thread) => {
+                    const phaseThreads = Object.values(threadsMeta).filter(thread => thread.phaseNo === phaseNo);
+
+                    if (!phaseThreads.length) {
+                        str += 'No spec files were found!\n\n';
+                    }
+
+                    phaseThreads.forEach((thread) => {
                         const threadPath = thread.path;
 
                         const threadId = Object.values(threadsMeta).length > 9 ? String(thread.threadNo).padStart(2, '0') : thread.threadNo;
@@ -804,7 +852,7 @@ module.exports = (config = {}) => {
                 return str;
             };
 
-            reportText = `See below to compare how each thread is performing.\n\n${generateThreadBars(longestThread.secs)}The percentages given above represent how much time individual threads take relative to thread #${longestThread.threadNo}, which took the longest to complete at ${longestThread.naturalString}. Any thread that takes significantly longer than others will be a bottleneck, so the closer the percentages are to one another, the better. A wide range in percentages indicates that the threads could be balanced more efficiently. Any failing tests will retry up to two more times, so in those instances the affected threads will take much longer to complete than if all tests passed on the first attempt.`;
+            reportText = `See below to compare how each thread performed.\n\n${generateThreadBars(longestThread.secs)}The percentages given above represent how much time individual threads took to complete relative to thread #${longestThread.threadNo}, which was the longest at ${longestThread.naturalString}. Any thread that takes significantly longer than others will be a bottleneck, so the closer the percentages are to one another, the better. A wide range in percentages indicates that the threads could be balanced more efficiently. Be alert as to whether any thread/test needed retrying, because that will skew the results for the affected threads.`;
 
             console.log(`\n\n${reportText}\n\n`);
 
@@ -975,6 +1023,13 @@ module.exports = (config = {}) => {
                   top: 0;
                   background: inherit;
                 }
+
+                .cmr-content button {
+                    background: rgb(239, 239, 239);
+                    border: 1px solid grey;
+                    padding: 5px;
+                    border-radius: 6px;
+                }
               </style>
               <script>
                 [...document.querySelectorAll('.cmr-pre-heading')].forEach((heading, index) => {
@@ -996,14 +1051,22 @@ module.exports = (config = {}) => {
                   });
                 });
 
+                function getScrollHeightFromBottom(){
+                    return Math.ceil(document.documentElement.scrollHeight - window.innerHeight - window.pageYOffset);
+                }
+
                 document.querySelector('#cmr-open-all').addEventListener('click', () => {
+                    const scrollBef=getScrollHeightFromBottom();
                     [...document.querySelectorAll('.cmr-pre-heading:not(.cmr-pre-heading-active)')].forEach((heading)=>{heading.click()});
                     window.scrollTo(0,999999999);
+                    window.scrollBy(0,-scrollBef);
                 });
 
                 document.querySelector('#cmr-close-all').addEventListener('click', () => {
+                    const scrollBef=getScrollHeightFromBottom();
                     [...document.querySelectorAll('.cmr-pre-heading-active')].forEach((heading)=>{heading.click()});
                     window.scrollTo(0,999999999);
+                    window.scrollBy(0,-scrollBef);
                 });
                 </script>
             </body>`;
