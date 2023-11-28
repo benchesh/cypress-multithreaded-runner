@@ -10,7 +10,7 @@ const kill = require('tree-kill');
 
 const path = require('path');
 
-const noConsoleColours = process.env.NO_COLOR === 1;
+const noConsoleColours = String(process.env.NO_COLOR) === '1';
 
 const { argv } = yargs(hideBin(process.argv))
     .array(['ignoreCliOverrides', 'phases', 'phaseDefaults.onlyRunSpecFilesIncludingAnyText', 'phaseDefaults.onlyRunSpecFilesIncludingAllText', 'specFiles'])
