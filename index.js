@@ -537,6 +537,7 @@ module.exports = (config = {}) => {
                 if (
                     !threadsMeta[threadNo].logs.includes('All specs passed')
                     && (!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock)
+                    && threadsMeta[threadNo].phaseNo < Object.keys(cypressConfigPhasesSorted).length
                 ) {
                     phaseLock = threadsMeta[threadNo].phaseNo;
 
@@ -860,7 +861,8 @@ module.exports = (config = {}) => {
                             }
 
                             if (threadsMeta[thread.threadNo].retries) {
-                                threadsMeta[thread.threadNo].status = 'warn';
+                                if (threadsMeta[thread.threadNo].status !== 'error') threadsMeta[thread.threadNo].status = 'warn';
+
                                 result.push(`the thread needed restarting ${threadsMeta[thread.threadNo].retries} time${threadsMeta[thread.threadNo].retries === 1 ? '' : 's'}`);
                             }
 
@@ -1153,7 +1155,7 @@ module.exports = (config = {}) => {
 
             // host the Allure report as a localhost
             if (hostAllure) {
-                runShellCommand(`allure open "${allureReportDir}"`);
+                runShellCommand(`allure open "${path.resolve(allureReportDir)}"`);
             } else if (openAllure) {
                 if (combinedAllureSuccessfully) {
                     runShellCommand(`open "${allureReportHtmlComplete}"`);
