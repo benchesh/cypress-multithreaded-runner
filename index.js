@@ -953,7 +953,7 @@ module.exports = (config = {}) => {
             ).forEach((file) => {
                 const threadNo = file.split('_')[1].split('.txt')[0];
 
-                threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">${threadNo === '2' && thread2ExtraLog ? `${thread2ExtraLog}\n` : ''}${fs.readFileSync(file).toString('utf8')}</pre></div>`;
+                threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading cmr-sticky"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">${threadNo === '2' && thread2ExtraLog ? `${thread2ExtraLog}\n` : ''}${fs.readFileSync(file).toString('utf8')}</pre></div>`;
             });
 
             Object.values(threadsMeta).forEach(thread => {
@@ -999,7 +999,7 @@ module.exports = (config = {}) => {
             const cmrAllureFooter = `<div class="cmr-content cmr-footer">${allLogs
                 .replace(/Couldn't find tsconfig.json. tsconfig-paths will be skipped\n/g, '')// this warning is noisy, remove it
                 .replace(/tput: No value for \$TERM and no -T specified\n/g, '')// this warning is noisy, remove it
-                }<div class="cmr-report"><button id="cmr-open-all">Open all logs above</button><button id="cmr-close-all">Close all logs above</button><br><br><h2>Thread Performance Summary</h2><pre>${reportText}</pre></div></div>
+                }<div class="cmr-report"><button id="cmr-open-all">Open all logs above</button><button id="cmr-close-all">Close all logs above</button><br><br><h2 class="cmr-sticky">Thread Performance Summary</h2><pre>${reportText}</pre></div></div>
             
                 <style>
                 .cmr-content #cmr-close-all {
@@ -1046,11 +1046,16 @@ module.exports = (config = {}) => {
             
                 .cmr-content .cmr-pre-heading {
                   cursor: pointer;
-                  display: flex;
-                  gap: 10px;
-                  position: sticky;
-                  top: 0;
-                  background: inherit;
+                }
+
+                .cmr-content .cmr-sticky {
+                    display: flex;
+                    gap: 10px;
+                    position: sticky;
+                    top: 0;
+                    margin-left: -1px;
+                    padding-left: 1px;
+                    background: inherit;
                 }
 
                 .cmr-content button {
