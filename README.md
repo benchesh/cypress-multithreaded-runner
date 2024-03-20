@@ -2,9 +2,9 @@
 
 A lightweight method to run Cypress spec files in multiple threads, with built-in support for Allure report generation.
 
-Out of the box, Cypress will only run your spec files in a single thread. It also won't create any kind of easy-to-read report once the tests have completed. By making use of this module, you'll be able to adapt your Cypress project to run much faster than before, while also generating a comprehensive Allure report for every run.
+When used out of the box, Cypress will only run your spec files in a single thread. It also won't create any kind of easy-to-read report once the tests have completed. By making use of this module, you'll be able to adapt your Cypress project to run much faster than before, while also generating a comprehensive Allure report for every run.
 
-NOTE: Currently, generating the Allure report is a needed in order for this module to function correctly, but this may change later.
+NOTE: Currently, generating the Allure report is needed in order for this module to function correctly, but this may change later.
 
 ## Dependencies
 
