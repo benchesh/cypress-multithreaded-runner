@@ -16,7 +16,9 @@ const { argv } = yargs(hideBin(process.argv))
     .array(['ignoreCliOverrides', 'phases', 'phaseDefaults.onlyRunSpecFilesIncludingAnyText', 'phaseDefaults.onlyRunSpecFilesIncludingAllText', 'specFiles'])
     .choices('logMode', [1, 2, 3, 4])
     .choices('threadMode', [1, 2])
-    .number(['maxThreadRestarts', 'threadDelay', 'threadTimeout', 'maxConcurrentThreads',
+    .number(['maxThreadRestarts', 'threadDelay',
+        'threadInactivityTimeout', 'threadTimeLimit',
+        'maxConcurrentThreads',
         'waitForFileExist.minSize', 'waitForFileExist.timeout'
     ])
     .boolean(['orderThreadsByBenchmark', 'openAllure', 'combineAllure', 'hostAllure',
@@ -101,6 +103,13 @@ const getFilesRecursive = (srcpath, arrayOfFiles = []) => {
     return arrayOfFiles;
 }
 
+const secondsToNaturalString = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds - (minutes * 60);
+
+    return `${minutes ? `${minutes} minute${minutes !== 1 ? 's' : ''}, ` : ''}${remainingSeconds} second${seconds !== 1 ? 's' : ''}`;
+};
+
 let SuperTout = class {
     #_tout;
     #_callback;
@@ -140,7 +149,10 @@ module.exports = (config = {}) => {
     const waitForFileMinimumSize = fullConfig.waitForFileExist?.minSize ?? 2;
     const waitForFileExistFilepath = fullConfig.waitForFileExist?.filepath;
     const stopWaitingForFileWhenFirstThreadCompletes = fullConfig.waitForFileExist?.stopWaitingWhenFirstThreadCompletes ?? true;
-    const threadTimeout = fullConfig.threadTimeout ?? 600;
+
+    const threadInactivityTimeout = fullConfig.threadInactivityTimeout ?? 60 * 10;
+    const threadTimeLimit = fullConfig.threadTimeLimit ?? 60 * 30;
+
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
     const logMode = fullConfig.logMode || 1;
     const allureReportHeading = fullConfig.allureReportHeading ? `: ${fullConfig.allureReportHeading}` : '';
@@ -440,22 +452,38 @@ module.exports = (config = {}) => {
                 logs += `${str}\n`;
             }
 
-            let inactivityTimer;
+            const setThreadInactivityTimer = () => {
+                if (!threadInactivityTimeout) return;
 
-            const setInactivityTimer = () => {
-                if (!threadTimeout) return;
-
-                clearTimeout(inactivityTimer);
-                inactivityTimer = setTimeout(() => {
-                    customWarning(`The Cypress instance in thread #${threadNo} hasn\'t responded for ${threadTimeout} seconds and will be considered a crash.`);
+                clearTimeout(threadsMeta[threadNo].threadInactivityTimer);
+                threadsMeta[threadNo].threadInactivityTimer = setTimeout(() => {
+                    customWarning(`The Cypress instance in thread #${threadNo} hasn\'t responded for ${secondsToNaturalString(threadInactivityTimeout)} and will be considered a crash.`);
 
                     restartTests = true;
 
-                    kill(cypressProcess.pid);
-                }, threadTimeout * 1000);
+                    kill(threadsMeta[threadNo].pid);
+                }, threadInactivityTimeout * 1000);
             };
 
-            setInactivityTimer();
+            setThreadInactivityTimer();
+
+            const setThreadTimeLimitTimer = () => {
+                if (!threadTimeLimit || threadsMeta[threadNo].threadTimeLimitTimer) return;
+
+                threadsMeta[threadNo].threadTimeLimitTimer = setTimeout(() => {
+                    customWarning(`CRITICAL ERROR: The Cypress instance in thread #${threadNo} has failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}. It will now stop running immediately.`);
+
+                    threadsMeta[threadNo].status = 'error';
+                    threadsMeta[threadNo].errorType = 'timeout';
+                    exitCode = 1;
+
+                    restartTests = false;
+
+                    kill(threadsMeta[threadNo].pid);
+                }, threadTimeLimit * 1000);
+            };
+
+            setThreadTimeLimitTimer();
 
             // detect known internal errors and restart the tests when they occur!
             const logCheck = async (log) => {
@@ -472,7 +500,7 @@ module.exports = (config = {}) => {
                     }
                 }
 
-                setInactivityTimer();
+                setThreadInactivityTimer();
 
                 logs += log;
 
@@ -544,7 +572,7 @@ module.exports = (config = {}) => {
                     const threadsFromPhasesAfterCurrent = Object.values(threadsMeta).filter(thread => thread.phaseNo > phaseLock);
 
                     if (threadsFromPhasesAfterCurrent.length) {
-                        customWarning(orange(`Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately.`))
+                        customWarning(orange(`Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately. Any remaining threads from phase ${phaseLock} will continue running.`))
 
                         threadsFromPhasesAfterCurrent.forEach((thread) => {
                             if (!threadsMeta[thread.threadNo].logs.includes('All specs passed')) {
@@ -575,7 +603,8 @@ module.exports = (config = {}) => {
 
             return new Promise((resolve) => {
                 cypressProcess.on('close', async () => {
-                    clearTimeout(inactivityTimer);
+                    clearTimeout(threadsMeta[threadNo].threadInactivityTimer);
+                    clearTimeout(threadsMeta[threadNo].threadTimeLimitTimer);
 
                     if (restartTests) {
                         restartAttempts++;
@@ -702,13 +731,6 @@ module.exports = (config = {}) => {
 
         // bulk of multithread report logic
         {
-            const secondsToNaturalString = (seconds) => {
-                const minutes = Math.floor(seconds / 60);
-                const remainingSeconds = seconds - (minutes * 60);
-
-                return `${minutes ? `${minutes} minute${minutes !== 1 ? 's' : ''}, ` : ''}${remainingSeconds} second${seconds !== 1 ? 's' : ''}`;
-            };
-
             let longestThread = { secs: -1 };
 
             Object.values(threadsMeta).forEach((thread) => {
@@ -818,6 +840,7 @@ module.exports = (config = {}) => {
 
                         if (threadsMeta[thread.threadNo].errorType === 'no-spec-files') {
                             const err = 'ERROR: No spec files found!';
+                            threadsMeta[thread.threadNo].status = 'error';
                             threadsMeta[thread.threadNo].heading.push(err);
                             threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${thread.threadNo}`;
                             str += `${err}\n\n`;
@@ -825,7 +848,12 @@ module.exports = (config = {}) => {
                         } else if (threadsMeta[thread.threadNo].errorType === 'critical') {
                             const err = 'CRITICAL ERROR: Thread did not complete!';
                             threadsMeta[thread.threadNo].status = 'error';
-                            threadsMeta[thread.threadNo].errorType = 'critical';
+                            threadsMeta[thread.threadNo].heading.push(err);
+                            str += `${err}\n\n`;
+                            exitCode = 1;
+                        } else if (threadsMeta[thread.threadNo].errorType === 'timeout') {
+                            const err = `CRITICAL ERROR: Thread did not complete as it went over the time limit of ${secondsToNaturalString(threadTimeLimit)}`;
+                            threadsMeta[thread.threadNo].status = 'error';
                             threadsMeta[thread.threadNo].heading.push(err);
                             str += `${err}\n\n`;
                             exitCode = 1;
@@ -955,7 +983,7 @@ module.exports = (config = {}) => {
             ).forEach((file) => {
                 const threadNo = file.split('_')[1].split('.txt')[0];
 
-                threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading cmr-sticky"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">${threadNo === '2' && thread2ExtraLog ? `${thread2ExtraLog}\n` : ''}${fs.readFileSync(file).toString('utf8').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></div>`;
+                threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading cmr-sticky"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">${threadNo === '2' && thread2ExtraLog ? `${thread2ExtraLog}\n` : ''}${fs.readFileSync(file).toString('utf8').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre></div>`;
             });
 
             Object.values(threadsMeta).forEach(thread => {
@@ -965,30 +993,35 @@ module.exports = (config = {}) => {
             })
 
             const criticalErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'critical').map(o => o[0]);
-            const minorErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').filter(o => o[1].errorType !== 'critical').map(o => o[0]);
-            const allErrorThreads = criticalErrorThreads.concat(minorErrorThreads);
+            const timeoutErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'timeout').map(o => o[0]);
+
+            const minorErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').filter(o => !['critical', 'timeout'].includes(o[1].errorType)).map(o => o[0]);
+            const allErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').map(o => o[0]);
             const warnThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'warn').map(o => o[0]);
 
+            const status = (() => {
+                if (allErrorThreads.length) return 'error';
+                if (warnThreads.length) return 'warn';
+                return 'success';
+            })();
+
             const cmrAllureBody = `<body>
-            <div class="cmr-content">
-                ${criticalErrorThreads.length ? `
+            <div class="cmr-content cmr-header">
+                <div class="cmr-${status}"><h2>Cypress Multithreaded Runner${allureReportHeading}${criticalErrorThreads || timeoutErrorThreads ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
+                ${(criticalErrorThreads.length || timeoutErrorThreads.length) ? `
                 <div class="cmr-error">
-                    <h2>Cypress Multithreaded Runner${allureReportHeading} [CRITICAL ERRORS - PLEASE READ]</h2>
-                    Be advised! This Allure report doesn't tell the full story. ${phaseLock ? `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>` : ''}<strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete! Therefore, one or more spec files may have not been fully tested! Scroll down to read the full logs from the separate threads.
+                    Be advised! This Allure report doesn't tell the full story. ${phaseLock ? `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>` : ''}${criticalErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete!` : ''}${timeoutErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</strong> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.` : ''} Therefore, one or more spec files may have not been fully tested! Scroll down to read the full logs from the separate threads.
                 </div>` : ''}
                 ${minorErrorThreads.length ? `
                 <div class="cmr-error">
-                    ${criticalErrorThreads.length ? '' : `<h2>Cypress Multithreaded Runner${allureReportHeading}</h2>`}
-                    ${minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${criticalErrorThreads.length ? '' : '<br>Scroll down to read the full logs from the separate threads.'}
+                    ${minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${(!criticalErrorThreads.length && !timeoutErrorThreads.length) ? '<br>Scroll down to read the full logs from the separate threads.' : ''}
                 </div>` : ''}
                 ${warnThreads.length ? `
                 <div class="cmr-warn">
-                    ${allErrorThreads.length ? '' : `<h2>Cypress Multithreaded Runner${allureReportHeading}</h2>`}
-                    ${warnThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${allErrorThreads.length ? '' : '<br>Scroll down to read the full logs from the separate threads.'}
+                    ${warnThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${status === 'warn' ? '<br>Scroll down to read the full logs from the separate threads.' : ''}
                 </div>` : ''}
-                ${!allErrorThreads.length && !warnThreads.length ? `
+                ${status === 'success' ? `
                 <div class="cmr-success">
-                    <h2>Cypress Multithreaded Runner${allureReportHeading}</h2>
                     Everything seems completely fine! No tests needed retrying. Scroll down to read the full logs from the separate threads.
                 </div>
                 `: ''}
@@ -1013,6 +1046,10 @@ module.exports = (config = {}) => {
             
                 .cmr-content h2 {
                   margin-top: 0;
+                }
+
+                .cmr-header h2 {
+                    margin: 0;
                 }
             
                 .cmr-content div:nth-child(even) {
