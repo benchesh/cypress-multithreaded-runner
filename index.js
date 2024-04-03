@@ -6,7 +6,8 @@ const fs = require('fs-extra');
 
 const { execSync, spawn } = require('child_process');
 
-const kill = require('tree-kill');
+const killSync = require('kill-sync');
+const kill = (pid) => killSync(pid, 'SIGINT', true);
 
 const path = require('path');
 
