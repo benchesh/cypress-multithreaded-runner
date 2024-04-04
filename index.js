@@ -1008,7 +1008,7 @@ module.exports = (config = {}) => {
 
             const cmrAllureBody = `<body>
             <div class="cmr-content cmr-header">
-                <div class="cmr-${status}"><h2>Cypress Multithreaded Runner${allureReportHeading}${criticalErrorThreads || timeoutErrorThreads ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
+                <div class="cmr-${status}"><h2>Cypress Multithreaded Runner${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
                 ${(criticalErrorThreads.length || timeoutErrorThreads.length) ? `
                 <div class="cmr-error">
                     Be advised! This Allure report doesn't tell the full story. ${phaseLock ? `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>` : ''}${criticalErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete!` : ''}${timeoutErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</strong> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.` : ''} Therefore, one or more spec files may have not been fully tested! Scroll down to read the full logs from the separate threads.
