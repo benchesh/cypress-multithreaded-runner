@@ -294,7 +294,7 @@ module.exports = (config = {}) => {
     const cypressConfigPhasesSorted = [];
 
     // raw test results are saved to this directory, which are then used to create the Allure report
-    const allureResultsPath = path.join(reportDir, 'allure-results');
+    const allureResultsPath = path.resolve(path.join(reportDir, 'allure-results'));
 
     const savedThreadBenchmark = fs.existsSync(threadBenchmarkFilepath) ? (() => {
         try {
@@ -743,24 +743,26 @@ module.exports = (config = {}) => {
                     path.join(allureResultsPath, String(thread.threadNo)),
                 ).forEach((file) => {
                     if (file.endsWith('.json')) {
-                        const { status, labels, fullName } = fs.readJsonSync(file);
+                        try {// try catch as not all JSON files will be parseable
+                            const { status, labels, fullName } = fs.readJsonSync(file);
 
-                        if (
-                            status
-                            && labels
-                            && fullName
-                            && !['passed', 'skipped'].includes(status)
-                        ) {
-                            // ensure the key is wholly unique (in case two tests have the same title)
-                            const key = `${fullName}${JSON.stringify(labels)}`;
+                            if (
+                                status
+                                && labels
+                                && fullName
+                                && !['passed', 'skipped'].includes(status)
+                            ) {
+                                // ensure the key is wholly unique (in case two tests have the same title)
+                                const key = `${fullName}${JSON.stringify(labels)}`;
 
-                            if (!failedTests[key]) failedTests[key] = 1;
-                            else failedTests[key] += 1;
+                                if (!failedTests[key]) failedTests[key] = 1;
+                                else failedTests[key] += 1;
 
-                            if (failedTests[key] > mostFailsForOneTest) {
-                                mostFailsForOneTest = failedTests[key];
+                                if (failedTests[key] > mostFailsForOneTest) {
+                                    mostFailsForOneTest = failedTests[key];
+                                }
                             }
-                        }
+                        } catch (err) { }
                     }
 
                     // files from all threads need to be in the same directory to construct the Allure report
@@ -799,10 +801,10 @@ module.exports = (config = {}) => {
                     if (JSON.stringify(savedThreadBenchmark[benchmarkId]) !== JSON.stringify(benchmarkObj)) {
                         console.log(`Updating thread order:\n["${benchmarkObj.order.join('", "')}"]`);
 
-                        fs.writeFileSync(threadBenchmarkFilepath, JSON.stringify({
+                        fs.writeFileSync(threadBenchmarkFilepath, `${JSON.stringify({
                             ...savedThreadBenchmark,
                             [benchmarkId]: benchmarkObj,
-                        }, null, 4));
+                        }, null, 4)}\n`);
                     } else {
                         console.log('The results of the thread benchmark are identical to the records already saved, so the thread order doesn\'t need changing!');
                     }
@@ -926,15 +928,17 @@ module.exports = (config = {}) => {
         getFiles(allureResultsPath).forEach((file) => {
             if (!file.endsWith('.json')) return;
 
-            const data = fs.readJsonSync(file);
+            try {// try catch as not all JSON files will be parseable
+                const data = fs.readJsonSync(file);
 
-            const { labels, fullName } = data;
+                const { labels, fullName } = data;
 
-            if (data.historyId && labels.length) {
-                data.historyId = Buffer.from(JSON.stringify(labels.concat(fullName))).toString('base64');
+                if (data.historyId && labels.length) {
+                    data.historyId = Buffer.from(JSON.stringify(labels.concat(fullName))).toString('base64');
 
-                fs.writeFileSync(file, JSON.stringify(data));
-            }
+                    fs.writeFileSync(file, JSON.stringify(data));
+                }
+            } catch (err) { }
         });
 
         // generate the Allure report from the most recent run
@@ -1156,7 +1160,7 @@ module.exports = (config = {}) => {
 
             if (combineAllure) {
                 try {
-                    runShellCommand('pip install allure-combine && allure-combine allure-report');
+                    runShellCommand('pip install --upgrade allure-combine && allure-combine allure-report');
 
                     fs.writeFileSync(
                         defaultAllureReportHtmlComplete,

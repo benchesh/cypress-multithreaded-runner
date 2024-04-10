@@ -1,1 +1,1 @@
-module.exports = require('@shelex/cypress-allure-plugin/writer');
+module.exports = require("@mmisty/cypress-allure-adapter/plugins").configureAllureAdapterPlugins;

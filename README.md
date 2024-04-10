@@ -9,7 +9,7 @@ NOTE: Currently, generating the Allure report is needed in order for this module
 ## Dependencies
 
 - [node 18 or above](https://nodejs.org/en/download)
-- A [Cypress](https://www.npmjs.com/package/cypress) project (tested on version `12.10`)
+- A [Cypress](https://www.npmjs.com/package/cypress) project (tested on versions `12.10` and `13.7`)
 - [pip](https://pypi.org/project/pip/) (optional: only needed if you wish to combine the Allure report into a single file)
 - [@cypress/grep](https://www.npmjs.com/package/@cypress/grep) (optional: only needed if you want to use Cypress grep features)
 
@@ -115,7 +115,7 @@ module.exports = defineConfig({
 });
 ```
 
-The imports above are simple wrappers for [@shelex/cypress-allure-plugin](https://www.npmjs.com/package/@shelex/cypress-allure-plugin), so refer to that module's readme should you wish to customise the plugin's behaviour.
+The imports above are simple wrappers for [@mmisty/cypress-allure-adapter](https://www.npmjs.com/package/@mmisty/cypress-allure-adapter), so refer to that module's readme should you wish to customise the plugin's behaviour.
 
 If either of the imports are missing, you may find that an empty Allure report is generated after running tests.
 
