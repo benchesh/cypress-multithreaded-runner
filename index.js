@@ -750,7 +750,7 @@ module.exports = (config = {}) => {
                                 status
                                 && labels
                                 && fullName
-                                && !['passed', 'skipped'].includes(status)
+                                && !['passed', 'skipped', 'unknown'].includes(status)
                             ) {
                                 // ensure the key is wholly unique (in case two tests have the same title)
                                 const key = `${fullName}${JSON.stringify(labels)}`;
