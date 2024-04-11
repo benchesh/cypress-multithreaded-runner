@@ -276,7 +276,8 @@ module.exports = (config = {}) => {
 
                     if (specFiles) {
                         return specsList.filter(spec => specFiles.some(
-                            specFile => path.resolve(specFile) === path.resolve(spec)
+                            specFile => (spec.endsWith(specFile) && path.basename(specFile) === path.basename(spec))
+                                || (path.resolve(specFile) === path.resolve(spec))
                         ));
                     }
 

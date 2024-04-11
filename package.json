@@ -1,6 +1,6 @@
 {
   "name": "cypress-multithreaded-runner",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "A lightweight method to run Cypress spec files in multiple threads, with built-in support for Allure report generation",
   "main": "index.js",
   "scripts": {
