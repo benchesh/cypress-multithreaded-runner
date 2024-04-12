@@ -291,18 +291,19 @@ module.exports = async (config = {}) => {
         }
     })() : {};
 
-
     if (orderThreadsByBenchmark && savedThreadBenchmark[benchmarkId]) {
         cypressConfigPhasesUnsorted.forEach((phase, phaseIndex) => {
             cypressConfigPhasesSorted[phaseIndex] = [];
 
+            const benchmarkOrder = [...new Set(savedThreadBenchmark[benchmarkId].order)];
+
             phase.forEach(thread => {// bring any threads not present in the benchmark to the front
-                if (!savedThreadBenchmark[benchmarkId].order.includes(String(thread.specPattern))) {
+                if (!benchmarkOrder.includes(String(thread.specPattern))) {
                     cypressConfigPhasesSorted[phaseIndex].push(thread);
                 }
             });
 
-            savedThreadBenchmark[benchmarkId].order.forEach(threadPath => {
+            benchmarkOrder.forEach(threadPath => {
                 cypressConfigPhasesSorted[phaseIndex].push(
                     phase.find(thread => String(thread.specPattern) === threadPath)
                 )
@@ -783,10 +784,10 @@ module.exports = async (config = {}) => {
         });
 
         if (saveThreadBenchmark) {
-            benchmarkObj.order = Object.values(threadsMeta).filter(thread => thread.perfResults.secs).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path);
+            benchmarkObj.order = [...new Set(Object.values(threadsMeta).filter(thread => thread.perfResults.secs).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path))];
 
             if (benchmarkObj.order.length < 2) {
-                console.log(orange('The thread benchmark will not be updated because two or more threads are required to determine the optimal order!'));
+                console.log(orange('The thread benchmark will not be updated because two or more threads with different files are required to determine the optimal order!'));
             } else if (Object.values(threadsMeta).length !== benchmarkObj.order.length) {
                 console.log(orange('The thread benchmark will not be updated because one or more phases did not complete!'));
             } else {
