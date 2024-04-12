@@ -57,6 +57,33 @@ A benchmark file will also be generated. This will dictate the optimal order in 
 
 Should tests in any phase fail, all threads from subsequent phases will stop immediately. If you don't wish this to happen, you'll want to just use one phase.
 
+### Generating the Allure report
+
+To generate Allure reports, you will need to add the following import to your [support file](https://on.cypress.io/writing-and-organizing-tests#Support-file):
+
+```javascript
+import "cypress-multithreaded-runner/allure";
+```
+
+In addition, add the following import to your [config file](https://docs.cypress.io/guides/references/configuration#setupNodeEvents):
+
+```javascript
+const allureWriter = require("cypress-multithreaded-runner/allure/writer");
+
+module.exports = defineConfig({
+  e2e: {
+    setupNodeEvents(on, config) {
+      allureWriter(on, config);
+      return config;
+    },
+  },
+});
+```
+
+The imports above are simple wrappers for [@mmisty/cypress-allure-adapter](https://www.npmjs.com/package/@mmisty/cypress-allure-adapter), so refer to that module's readme should you wish to customise the plugin's behaviour.
+
+If either of the imports are missing, you may find that an empty Allure report is generated after running tests.
+
 ### Optional: Grep
 
 If you want to make use of [@cypress/grep](https://www.npmjs.com/package/@cypress/grep), add it as a dependency to your project and follow the [official readme](https://github.com/cypress-io/cypress/tree/develop/npm/grep#readme) to see how to import it. Refer to the [options table](#options) to see what features are supported by cypress-multithreaded-runner out of the box.
@@ -92,34 +119,39 @@ runner({
 });
 ```
 
-### Optional: Allure report
+### Optional: Prevent the parent process from ending when tests fail
 
-To generate Allure reports, you will need to add the following import to your [support file](https://on.cypress.io/writing-and-organizing-tests#Support-file):
+By default, this module will end the parent process (with exit code 1) should the tests complete with one or more failures. Bypassing this will therefore allow your app to continue running every time the tests complete. You can set `endProcessIfTestsFail` to false to achieve this.
 
-```javascript
-import "cypress-multithreaded-runner/allure";
-```
+#### Get the exit code
 
-In addition, add the following import to your [config file](https://docs.cypress.io/guides/references/configuration#setupNodeEvents):
+Unless an error unrelated to one of your tests occurs, you can get the aforementioned exit code by running this module in async mode. To achieve this, import and use the module like so:
 
 ```javascript
-const allureWriter = require("cypress-multithreaded-runner/allure/writer");
+const asyncRunner = require("cypress-multithreaded-runner/async"); // different import
 
-module.exports = defineConfig({
-  e2e: {
-    setupNodeEvents(on, config) {
-      allureWriter(on, config);
-      return config;
+const cypressConfigOverride = {
+  reportDir: "put-the-reports-here",
+};
+
+(async () => {
+  const exitCode = await runner({
+    cypressConfig: {
+      filepath: "src/cypress/configurations/my-generic-cypress.config.js",
+      object: cypressConfigOverride,
     },
-  },
-});
+    reportDir: cypressConfigOverride.reportDir,
+    specsDir: "src/cypress/tests",
+    endProcessIfTestsFail: false, // if this isn't set to false, your app will stop running if any tests fail!
+  });
+
+  console.log("exitCode: ", exitCode);
+})();
 ```
 
-The imports above are simple wrappers for [@mmisty/cypress-allure-adapter](https://www.npmjs.com/package/@mmisty/cypress-allure-adapter), so refer to that module's readme should you wish to customise the plugin's behaviour.
+The exit code will be 0 if all tests pass and 1 if any test fails.
 
-If either of the imports are missing, you may find that an empty Allure report is generated after running tests.
-
-### Guidance
+### General guidance
 
 Pay attention to the performance of each thread when adding a new test. It is a good idea to try making the accumulation of tests in each thread take roughly the same amount of time to finish running, as any thread that takes significantly longer than the others will be a bottleneck! Therefore, try to add any new tests to threads which aren't oversaturated. You can have a look at how each thread is performing by viewing the "Thread Performance Summary" & other logs, all of which will be added to the bottom of the Allure report as well as in separate text files.
 
@@ -163,6 +195,8 @@ The module makes use of `argv` to allow options to be overriden via the command 
 | `benchmarkDescription`    | string           | null                                 | An optional string to add to the benchmark such that its identifier is easily understandable. The value of this string will also be encoded into the identifier. For example, if you run your suite of tests two times and the only argument that's different is the `benchmarkDescription`, the results from the first run won't overwrite the second.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `phaseDefaults`           | object           | null                                 | Default properties you wish to set for every object in the `phases` array. For more info, see [table below](#phases).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `phases`                  | arrayOf(object)  | null                                 | Phases of Cypress test threads. Any phase can have any number of threads. Every object will override equivalent property keys set in `phaseDefaults`.<br>Should tests in any phase fail, all threads from subsequent phases will stop immediately. For example, you may want to run high priority tests first, then medium priority, then low priority. If the high priority tests fail, the medium & low priority tests will stop running. For more info, see [table below](#phases).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `repeat`                  | number           | 1                                    | The number of times all phases should repeat. Make use of this to stress test your system and identify any unstable tests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `endProcessIfTestsFail`   | boolean          | true                                 | When set to true, the parent process will stop running (with exit code 1) if any test fails.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ### phases
 
