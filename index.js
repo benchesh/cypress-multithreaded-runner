@@ -1,7 +1,5 @@
 // NOTE: Comments and general structure of this file are WIP
 
-const yargs = require('yargs/yargs');
-const { hideBin } = require('yargs/helpers');
 const fs = require('fs-extra');
 
 const { execSync, spawn } = require('child_process');
@@ -12,22 +10,6 @@ const kill = (pid) => killSync(pid, 'SIGINT', true);
 const path = require('path');
 
 const noConsoleColours = String(process.env.NO_COLOR) === '1';
-
-const { argv } = yargs(hideBin(process.argv))
-    .array(['ignoreCliOverrides', 'phases', 'phaseDefaults.onlyRunSpecFilesIncludingAnyText', 'phaseDefaults.onlyRunSpecFilesIncludingAllText', 'specFiles'])
-    .choices('logMode', [1, 2, 3, 4])
-    .choices('threadMode', [1, 2])
-    .number(['maxThreadRestarts', 'threadDelay',
-        'threadInactivityTimeout', 'threadTimeLimit',
-        'maxConcurrentThreads',
-        'waitForFileExist.minSize', 'waitForFileExist.timeout'
-    ])
-    .boolean(['orderThreadsByBenchmark', 'openAllure', 'combineAllure', 'hostAllure',
-        'waitForFileExist.deleteAfterCompletion', 'waitForFileExist.stopWaitingWhenFirstThreadCompletes'
-    ])
-    .alias('open', 'openAllure')
-    .alias('combine', 'combineAllure')
-    .alias('host', 'hostAllure')
 
 /**
  * Recursively create a path if it doesn't exist
@@ -137,8 +119,8 @@ const filterObj = (obj) => {
     }, {})
 }
 
-module.exports = (config = {}) => {
-    const fullConfig = { ...config, ...argv };
+module.exports = async (config = {}) => {
+    const fullConfig = require('./lib/process-args').getFullConfig(config);
 
     (fullConfig.ignoreCliOverrides || []).forEach(prop => {
         fullConfig[prop] = config[prop];
@@ -163,6 +145,10 @@ module.exports = (config = {}) => {
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
     const benchmarkDescription = fullConfig.benchmarkDescription ?? null;
     const specFiles = fullConfig.specFiles ?? null;
+
+    const endProcessIfTestsFail = fullConfig.endProcessIfTestsFail ?? true;
+
+    const repeat = fullConfig.repeat || 1;
 
     const reportHeadNotes = [];
 
@@ -348,26 +334,28 @@ module.exports = (config = {}) => {
             return;
         }
 
-        phase.forEach((thread) => {
-            const threadNo = Number(Object.values(threadsMeta).length) + 1;
-            const path = String(thread.specPattern);
+        for (let i = 0; i < repeat; i++) {
+            phase.forEach((thread) => {
+                const threadNo = Number(Object.values(threadsMeta).length) + 1;
+                const path = String(thread.specPattern);
 
-            threadsMeta[threadNo] = {
-                cypressConfigFilepath: phases[phaseIndex].cypressConfigFilepath,
-                cypressConfig: JSON.stringify(thread),
-                path,
-                phaseNo,
-                threadNo: threadNo,
-                status: 'success',
-                retries: 0,
-                perfResults: {},
-                logs: '',
-                printedLogs: false,
-                additionalCypressEnvArgs: phases[phaseIndex].additionalCypressEnvArgs,
-            }
+                threadsMeta[threadNo] = {
+                    cypressConfigFilepath: phases[phaseIndex].cypressConfigFilepath,
+                    cypressConfig: JSON.stringify(thread),
+                    path,
+                    phaseNo,
+                    threadNo: threadNo,
+                    status: 'success',
+                    retries: 0,
+                    perfResults: {},
+                    logs: '',
+                    printedLogs: false,
+                    additionalCypressEnvArgs: phases[phaseIndex].additionalCypressEnvArgs,
+                }
 
-            initLogs[initLogs.length - 1] += `\nThread ${threadNo}: "${path}"${!savedThreadBenchmark[benchmarkId]?.order.includes(path) ? ' (not found in benchmark)' : ''}`;
-        });
+                initLogs[initLogs.length - 1] += `\nThread ${threadNo}: "${path}"${!savedThreadBenchmark[benchmarkId]?.order.includes(path) ? ' (not found in benchmark)' : ''}`;
+            });
+        }
 
         if (phases[phaseIndex].onlyRunSpecFilesIncludingAnyText) {
             const note = `NOTE: For phase #${phaseNo}, onlyRunSpecFilesIncludingAnyText is set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAnyText.join('", "')}"]. Therefore, only spec files that contain any strings from this array will be processed.`;
@@ -392,6 +380,10 @@ module.exports = (config = {}) => {
 
     initLogs.push(`A maximum of ${Object.values(threadsMeta).length < maxConcurrentThreads ? Object.values(threadsMeta).length : maxConcurrentThreads} threads will be used at any one time.\nThis code is executing on a machine with ${require('os').cpus().length} logical CPU threads.`);
 
+    if (repeat) {
+        initLogs.push(green(`Repeat is set to ${repeat}. Therefore, all threads in all phases will run ${repeat} times, regardless of whether the tests pass or fail.`));
+    }
+
     if (!saveThreadBenchmark) {
         initLogs.push(orange('saveThreadBenchmark is set to false, therefore the benchmark file will not be updated when this run completes.'));
     }
@@ -412,810 +404,812 @@ module.exports = (config = {}) => {
 
     let phaseLock;
 
-    (async () => {
-        async function spawnThread(threadNo, logs = '', restartAttempts = 0, threadStarted = false) {
-            const cypressProcess = spawn('bash', [
-                path.resolve(__dirname, 'shell.sh'),
-                // arguments for the shell script
-                allureResultsPath || '',// $1
-                threadsMeta[threadNo].cypressConfigFilepath || '',// $2
-                threadsMeta[threadNo].cypressConfig,// $3
-                threadNo,// $4
-                threadsMeta[threadNo].additionalCypressEnvArgs,// $5
-            ]);
+    async function spawnThread(threadNo, logs = '', restartAttempts = 0, threadStarted = false) {
+        const cypressProcess = spawn('bash', [
+            path.resolve(__dirname, 'shell.sh'),
+            // arguments for the shell script
+            allureResultsPath || '',// $1
+            threadsMeta[threadNo].cypressConfigFilepath || '',// $2
+            threadsMeta[threadNo].cypressConfig,// $3
+            threadNo,// $4
+            threadsMeta[threadNo].additionalCypressEnvArgs,// $5
+        ]);
 
-            threadsMeta[threadNo].pid = cypressProcess.pid;
+        threadsMeta[threadNo].pid = cypressProcess.pid;
 
-            if (!threadsMeta[threadNo].retries) noOfThreadsInUse++;
+        if (!threadsMeta[threadNo].retries) noOfThreadsInUse++;
 
-            let restartTests = false;
+        let restartTests = false;
 
-            if (phaseLock && phaseLock < threadsMeta[threadNo].phaseNo) {//hack this is daft but it works. Prevent thread from running if a thread from a previous phase has already failed
-                kill(cypressProcess.pid);
-                return;
+        if (phaseLock && phaseLock < threadsMeta[threadNo].phaseNo) {//hack this is daft but it works. Prevent thread from running if a thread from a previous phase has already failed
+            kill(cypressProcess.pid);
+            return;
+        }
+
+        if (noOfThreadsInUse > 1 && logMode < 3 && !threadsMeta[threadNo].printedLogs) {
+            if (logMode === 1) {
+                console.log(`Thread #${threadNo} is now starting, and its logs will be printed when all preceding threads have completed.`);
+            } else if (logMode === 2) {
+                const fullQueue = [Object.values(threadsMeta).filter(thread => thread.printedLogs === 'some')].concat(logQueue);
+
+                console.log(`Thread #${threadNo} is now starting, and its logs will be printed once thread${fullQueue.length !== 1 ? 's' : ''}${fullQueue.map(thread => thread.threadNo)} have printed their logs.`);
             }
+        } else {
+            console.log(`Thread #${threadNo} is now starting...`);
+        }
 
-            if (noOfThreadsInUse > 1 && logMode < 3 && !threadsMeta[threadNo].printedLogs) {
-                if (logMode === 1) {
-                    console.log(`Thread #${threadNo} is now starting, and its logs will be printed when all preceding threads have completed.`);
-                } else if (logMode === 2) {
-                    const fullQueue = [Object.values(threadsMeta).filter(thread => thread.printedLogs === 'some')].concat(logQueue);
+        if (!threadsMeta[threadNo].retries) threadsMeta[threadNo].perfResults.startTime = performance.now();
 
-                    console.log(`Thread #${threadNo} is now starting, and its logs will be printed once thread${fullQueue.length !== 1 ? 's' : ''}${fullQueue.map(thread => thread.threadNo)} have printed their logs.`);
-                }
+        const customWarning = (str) => {
+            console.warn(orange(str));
+            logs += `${str}\n`;
+        }
+
+        const setThreadInactivityTimer = () => {
+            if (!threadInactivityTimeout) return;
+
+            clearTimeout(threadsMeta[threadNo].threadInactivityTimer);
+            threadsMeta[threadNo].threadInactivityTimer = setTimeout(() => {
+                customWarning(`The Cypress instance in thread #${threadNo} hasn\'t responded for ${secondsToNaturalString(threadInactivityTimeout)} and will be considered a crash.`);
+
+                restartTests = true;
+
+                kill(threadsMeta[threadNo].pid);
+            }, threadInactivityTimeout * 1000);
+        };
+
+        setThreadInactivityTimer();
+
+        const setThreadTimeLimitTimer = () => {
+            if (!threadTimeLimit || threadsMeta[threadNo].threadTimeLimitTimer) return;
+
+            threadsMeta[threadNo].threadTimeLimitTimer = setTimeout(() => {
+                customWarning(`CRITICAL ERROR: The Cypress instance in thread #${threadNo} has failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}. It will now stop running immediately.`);
+
+                threadsMeta[threadNo].status = 'error';
+                threadsMeta[threadNo].errorType = 'timeout';
+                exitCode = 1;
+
+                restartTests = false;
+
+                kill(threadsMeta[threadNo].pid);
+            }, threadTimeLimit * 1000);
+        };
+
+        setThreadTimeLimitTimer();
+
+        // detect known internal errors and restart the tests when they occur!
+        const logCheck = async (log) => {
+            threadsMeta[threadNo].logs += log;
+
+            if (logMode > 2) {
+                process.stdout.write(log);
             } else {
-                console.log(`Thread #${threadNo} is now starting...`);
+                if (threadsMeta[threadNo].printedLogs) {
+                    process.stdout.write(log);
+                } else if (!Object.values(threadsMeta).some(thread => thread.printedLogs === 'some' || thread.printedLogs === 'queue')) {
+                    threadsMeta[threadNo].printedLogs = 'some';
+                    process.stdout.write(log);
+                }
             }
-
-            if (!threadsMeta[threadNo].retries) threadsMeta[threadNo].perfResults.startTime = performance.now();
-
-            const customWarning = (str) => {
-                console.warn(orange(str));
-                logs += `${str}\n`;
-            }
-
-            const setThreadInactivityTimer = () => {
-                if (!threadInactivityTimeout) return;
-
-                clearTimeout(threadsMeta[threadNo].threadInactivityTimer);
-                threadsMeta[threadNo].threadInactivityTimer = setTimeout(() => {
-                    customWarning(`The Cypress instance in thread #${threadNo} hasn\'t responded for ${secondsToNaturalString(threadInactivityTimeout)} and will be considered a crash.`);
-
-                    restartTests = true;
-
-                    kill(threadsMeta[threadNo].pid);
-                }, threadInactivityTimeout * 1000);
-            };
 
             setThreadInactivityTimer();
 
-            const setThreadTimeLimitTimer = () => {
-                if (!threadTimeLimit || threadsMeta[threadNo].threadTimeLimitTimer) return;
+            logs += log;
 
-                threadsMeta[threadNo].threadTimeLimitTimer = setTimeout(() => {
-                    customWarning(`CRITICAL ERROR: The Cypress instance in thread #${threadNo} has failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}. It will now stop running immediately.`);
+            if (
+                log.includes('uncaught error was detected outside of a test')
+                || log.includes('we are skipping the remaining tests in the current suite')
+                || log.includes('Cypress could not associate this error to any specific test.')
+                || log.includes('Cypress: Fatal IO error')
+                || log.includes('Webpack Compilation Error')
+            ) {
+                restartTests = true;
 
-                    threadsMeta[threadNo].status = 'error';
-                    threadsMeta[threadNo].errorType = 'timeout';
-                    exitCode = 1;
+                kill(cypressProcess.pid);
+            } else if (log.includes('no spec files were found')) {
+                threadsMeta[threadNo].status = 'error';
+                threadsMeta[threadNo].errorType = 'no-spec-files';
 
-                    restartTests = false;
+                kill(cypressProcess.pid);
+            } else if (!threadStarted && log.includes('(Run Starting)')) {
+                threadStarted = true;
+                threadDelayTout.clearTimeout();
+            }
+        };
 
-                    kill(threadsMeta[threadNo].pid);
-                }, threadTimeLimit * 1000);
-            };
+        cypressProcess.stdout.on('data', (data) => logCheck(data.toString()));
+        cypressProcess.stderr.on('data', (data) => logCheck(data.toString()));
 
-            setThreadTimeLimitTimer();
-
-            // detect known internal errors and restart the tests when they occur!
-            const logCheck = async (log) => {
-                threadsMeta[threadNo].logs += log;
-
-                if (logMode > 2) {
-                    process.stdout.write(log);
-                } else {
-                    if (threadsMeta[threadNo].printedLogs) {
-                        process.stdout.write(log);
-                    } else if (!Object.values(threadsMeta).some(thread => thread.printedLogs === 'some' || thread.printedLogs === 'queue')) {
-                        threadsMeta[threadNo].printedLogs = 'some';
-                        process.stdout.write(log);
-                    }
-                }
-
-                setThreadInactivityTimer();
-
-                logs += log;
-
-                if (
-                    log.includes('uncaught error was detected outside of a test')
-                    || log.includes('we are skipping the remaining tests in the current suite')
-                    || log.includes('Cypress could not associate this error to any specific test.')
-                    || log.includes('Cypress: Fatal IO error')
-                    || log.includes('Webpack Compilation Error')
-                ) {
-                    restartTests = true;
-
-                    kill(cypressProcess.pid);
-                } else if (log.includes('no spec files were found')) {
-                    threadsMeta[threadNo].status = 'error';
-                    threadsMeta[threadNo].errorType = 'no-spec-files';
-
-                    kill(cypressProcess.pid);
-                } else if (!threadStarted && log.includes('(Run Starting)')) {
-                    threadStarted = true;
-                    threadDelayTout.clearTimeout();
-                }
-            };
-
-            cypressProcess.stdout.on('data', (data) => logCheck(data.toString()));
-            cypressProcess.stderr.on('data', (data) => logCheck(data.toString()));
-
-            const printAllLogs = () => {
-                if (logMode > 2) {
-                    return;
-                }
-
-                if (threadsMeta[threadNo].printedLogs) {
-                    threadsMeta[threadNo].printedLogs = 'all';
-
-                    logQueue = Object.values(threadsMeta).filter(thread => thread.printedLogs === 'queue');
-                    const nextThreadToLog = Object.values(threadsMeta).find(thread => !thread.printedLogs);
-
-                    for (let index = 0; index < logQueue.length; index++) {
-                        if (logMode === 1 && logQueue[index].threadNo > nextThreadToLog?.threadNo) {//leave queued to maintain chronology
-                            break;
-                        } else {
-                            threadsMeta[logQueue[index].threadNo].printedLogs = 'all';
-                            process.stdout.write(logQueue[index].logs);
-                        }
-                    }
-
-                    if (nextThreadToLog) {
-                        threadsMeta[nextThreadToLog.threadNo].printedLogs = 'some';
-                        process.stdout.write(nextThreadToLog.logs);
-                    }
-                } else {
-                    threadsMeta[threadNo].printedLogs = 'queue';
-                }
+        const printAllLogs = () => {
+            if (logMode > 2) {
+                return;
             }
 
-            logCheck(`Start of thread #${threadNo}:\n`);
+            if (threadsMeta[threadNo].printedLogs) {
+                threadsMeta[threadNo].printedLogs = 'all';
 
-            const threadCompleteFunc = () => {
-                printAllLogs();
+                logQueue = Object.values(threadsMeta).filter(thread => thread.printedLogs === 'queue');
+                const nextThreadToLog = Object.values(threadsMeta).find(thread => !thread.printedLogs);
 
-                if (
-                    !threadsMeta[threadNo].logs.includes('All specs passed')
-                    && (!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock)
-                    && threadsMeta[threadNo].phaseNo < Object.keys(cypressConfigPhasesSorted).length
-                ) {
-                    phaseLock = threadsMeta[threadNo].phaseNo;
-
-                    const threadsFromPhasesAfterCurrent = Object.values(threadsMeta).filter(thread => thread.phaseNo > phaseLock);
-
-                    if (threadsFromPhasesAfterCurrent.length) {
-                        customWarning(orange(`Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately. Any remaining threads from phase ${phaseLock} will continue running.`))
-
-                        threadsFromPhasesAfterCurrent.forEach((thread) => {
-                            if (!threadsMeta[thread.threadNo].logs.includes('All specs passed')) {
-                                threadsMeta[thread.threadNo].status = 'error';
-                                threadsMeta[thread.threadNo].errorType = 'critical';
-                                threadsMeta[thread.threadNo].perfResults.secs = undefined;
-                                threadsMeta[thread.threadNo].perfResults.startTime = undefined;
-                            }
-
-                            if (thread.pid) kill(thread.pid);
-                        });
-                    }
-                }
-
-                writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
-
-                // the thread might not have been marked as started if it never started properly!
-                if (!threadStarted) threadStarted = true;
-
-                noOfThreadsInUse--;
-                threadDelayTout.clearTimeout();// todo this doesn't consider whether another thread is currently restarting and so may end a timeout early, but it doesn't really matter...
-                threadsMeta[threadNo].complete = true;
-                threadsMeta[threadNo].pid = false;
-                threadsMeta[threadNo].perfResults.secs = parseInt(
-                    (performance.now() - threadsMeta[threadNo].perfResults.startTime) / 1000
-                );
-            }
-
-            return new Promise((resolve) => {
-                cypressProcess.on('close', async () => {
-                    clearTimeout(threadsMeta[threadNo].threadInactivityTimer);
-                    clearTimeout(threadsMeta[threadNo].threadTimeLimitTimer);
-
-                    if (restartTests) {
-                        restartAttempts++;
-                        threadsMeta[threadNo].retries++;
-
-                        if (restartAttempts < maxThreadRestarts) {
-                            threadsMeta[threadNo].status = 'warn';
-
-                            customWarning(`WARNING: Internal Cypress error in thread #${threadNo}! Will retry a maximum of ${maxThreadRestarts - restartAttempts} more time${(maxThreadRestarts - restartAttempts) !== 1 ? 's' : ''}.`);
-
-                            // delete any test results as they'll interfere with the next run
-                            if (fs.pathExistsSync(path.join(allureResultsPath, String(threadNo)))) {
-                                fs.rmSync(path.join(allureResultsPath, String(threadNo)), { recursive: true, force: true });
-                            }
-
-                            await spawnThread(threadNo, logs, restartAttempts, threadStarted);
-                        } else {
-                            threadsMeta[threadNo].status = 'error';
-                            threadsMeta[threadNo].errorType = 'critical';
-                            exitCode = 1;
-
-                            customWarning(`CRITICAL ERROR: Too many internal Cypress errors in thread #${threadNo}. Giving up after ${maxThreadRestarts} attempts!`);
-                            threadCompleteFunc();
-                        }
-
-                        resolve();
+                for (let index = 0; index < logQueue.length; index++) {
+                    if (logMode === 1 && logQueue[index].threadNo > nextThreadToLog?.threadNo) {//leave queued to maintain chronology
+                        break;
                     } else {
-                        threadCompleteFunc();
-
-                        resolve();
+                        threadsMeta[logQueue[index].threadNo].printedLogs = 'all';
+                        process.stdout.write(logQueue[index].logs);
                     }
-                });
-            });
+                }
+
+                if (nextThreadToLog) {
+                    threadsMeta[nextThreadToLog.threadNo].printedLogs = 'some';
+                    process.stdout.write(nextThreadToLog.logs);
+                }
+            } else {
+                threadsMeta[threadNo].printedLogs = 'queue';
+            }
         }
 
-        const waitForFileExist = () => {
-            let waitForFileExistRemainingTime = waitForFileExistTimeout;
+        logCheck(`Start of thread #${threadNo}:\n`);
 
-            return new Promise(resolve => {
-                const interv = setInterval(() => {
-                    if (
-                        fs.existsSync(waitForFileExistFilepath)
-                        && Buffer.byteLength(fs.readFileSync(waitForFileExistFilepath)) >= waitForFileMinimumSize
-                    ) {// the file exists and has an acceptable filesize
-                        clearInterval(interv);
-                        resolve();
-                    } else if (
-                        stopWaitingForFileWhenFirstThreadCompletes
-                        && Object.values(threadsMeta).find(thread => thread.complete)
-                    ) {
+        const threadCompleteFunc = () => {
+            printAllLogs();
+
+            if (
+                !threadsMeta[threadNo].logs.includes('All specs passed')
+                && (!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock)
+                && threadsMeta[threadNo].phaseNo < Object.keys(cypressConfigPhasesSorted).length
+            ) {
+                phaseLock = threadsMeta[threadNo].phaseNo;
+
+                const threadsFromPhasesAfterCurrent = Object.values(threadsMeta).filter(thread => thread.phaseNo > phaseLock);
+
+                if (threadsFromPhasesAfterCurrent.length) {
+                    customWarning(orange(`Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately. Any remaining threads from phase ${phaseLock} will continue running.`))
+
+                    threadsFromPhasesAfterCurrent.forEach((thread) => {
+                        if (!threadsMeta[thread.threadNo].logs.includes('All specs passed')) {
+                            threadsMeta[thread.threadNo].status = 'error';
+                            threadsMeta[thread.threadNo].errorType = 'critical';
+                            threadsMeta[thread.threadNo].perfResults.secs = undefined;
+                            threadsMeta[thread.threadNo].perfResults.startTime = undefined;
+                        }
+
+                        if (thread.pid) kill(thread.pid);
+                    });
+                }
+            }
+
+            writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
+
+            // the thread might not have been marked as started if it never started properly!
+            if (!threadStarted) threadStarted = true;
+
+            noOfThreadsInUse--;
+            threadDelayTout.clearTimeout();// todo this doesn't consider whether another thread is currently restarting and so may end a timeout early, but it doesn't really matter...
+            threadsMeta[threadNo].complete = true;
+            threadsMeta[threadNo].pid = false;
+            threadsMeta[threadNo].perfResults.secs = parseInt(
+                (performance.now() - threadsMeta[threadNo].perfResults.startTime) / 1000
+            );
+        }
+
+        return new Promise((resolve) => {
+            cypressProcess.on('close', async () => {
+                clearTimeout(threadsMeta[threadNo].threadInactivityTimer);
+                clearTimeout(threadsMeta[threadNo].threadTimeLimitTimer);
+
+                if (restartTests) {
+                    restartAttempts++;
+                    threadsMeta[threadNo].retries++;
+
+                    if (restartAttempts < maxThreadRestarts) {
+                        threadsMeta[threadNo].status = 'warn';
+
+                        customWarning(`WARNING: Internal Cypress error in thread #${threadNo}! Will retry a maximum of ${maxThreadRestarts - restartAttempts} more time${(maxThreadRestarts - restartAttempts) !== 1 ? 's' : ''}.`);
+
+                        // delete any test results as they'll interfere with the next run
+                        if (fs.pathExistsSync(path.join(allureResultsPath, String(threadNo)))) {
+                            fs.rmSync(path.join(allureResultsPath, String(threadNo)), { recursive: true, force: true });
+                        }
+
+                        await spawnThread(threadNo, logs, restartAttempts, threadStarted);
+                    } else {
+                        threadsMeta[threadNo].status = 'error';
+                        threadsMeta[threadNo].errorType = 'critical';
+                        exitCode = 1;
+
+                        customWarning(`CRITICAL ERROR: Too many internal Cypress errors in thread #${threadNo}. Giving up after ${maxThreadRestarts} attempts!`);
+                        threadCompleteFunc();
+                    }
+
+                    resolve();
+                } else {
+                    threadCompleteFunc();
+
+                    resolve();
+                }
+            });
+        });
+    }
+
+    const waitForFileExist = () => {
+        let waitForFileExistRemainingTime = waitForFileExistTimeout;
+
+        return new Promise(resolve => {
+            const interv = setInterval(() => {
+                if (
+                    fs.existsSync(waitForFileExistFilepath)
+                    && Buffer.byteLength(fs.readFileSync(waitForFileExistFilepath)) >= waitForFileMinimumSize
+                ) {// the file exists and has an acceptable filesize
+                    clearInterval(interv);
+                    resolve();
+                } else if (
+                    stopWaitingForFileWhenFirstThreadCompletes
+                    && Object.values(threadsMeta).find(thread => thread.complete)
+                ) {
+                    //TODO not the best solution, too bad!
+                    thread2ExtraLog = `WARNING: There may be an issue as the first thread has completed but the "${waitForFileExistFilepath}" file doesn't exist... will continue anyway!`;
+                    console.warn(orange(thread2ExtraLog));
+
+                    clearInterval(interv);
+                    resolve();
+                } else {
+                    waitForFileExistRemainingTime -= 0.5;
+
+                    if (waitForFileExistRemainingTime <= 0) {
                         //TODO not the best solution, too bad!
-                        thread2ExtraLog = `WARNING: There may be an issue as the first thread has completed but the "${waitForFileExistFilepath}" file doesn't exist... will continue anyway!`;
+                        thread2ExtraLog = `WARNING: There may be an issue as the "${waitForFileExistFilepath}" file doesn't exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
                         console.warn(orange(thread2ExtraLog));
 
                         clearInterval(interv);
                         resolve();
-                    } else {
-                        waitForFileExistRemainingTime -= 0.5;
-
-                        if (waitForFileExistRemainingTime <= 0) {
-                            //TODO not the best solution, too bad!
-                            thread2ExtraLog = `WARNING: There may be an issue as the "${waitForFileExistFilepath}" file doesn't exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
-                            console.warn(orange(thread2ExtraLog));
-
-                            clearInterval(interv);
-                            resolve();
-                        }
-                    }
-                }, 500);
-            });
-        }
-
-        // the maximum delay before starting the next thread
-        // the delay will be interrupted as soon as the current Cypress has started running
-        const delay = (ms) => {
-            return new Promise(resolve => threadDelayTout.setTimeout(() => {
-                if (noOfThreadsInUse < maxConcurrentThreads) {
-                    resolve();
-                }
-            }, ms));
-        }
-
-        async function runCypressTests() {
-            let threadsArr = []
-            threadsArr.push(spawnThread(1));
-
-            if (Object.values(threadsMeta).length > 1) {
-                if (waitForFileExistFilepath) {
-                    // decrease total delay by .5s as waitForFileExist will check for the file in intervals of .5s
-                    await delay(threadDelay - 500 > 0 ? threadDelay - 500 : 0);
-
-                    await waitForFileExist();
-                } else {
-                    await delay(threadDelay);
-                }
-
-                threadsArr.push(spawnThread(2));
-
-                for (const [_, thread] of Object.values(threadsMeta).slice(2).entries()) {
-                    await delay(threadDelay);
-
-                    if (!phaseLock || thread.phaseNo <= phaseLock) {//hack this is daft but it works
-                        threadsArr.push(spawnThread(thread.threadNo));
-                    } else {
-                        break;
                     }
                 }
-            }
-
-            await Promise.all(threadsArr)
-        }
-
-        await runCypressTests();
-
-        if (logMode === 4) {
-            Object.values(threadsMeta).forEach(thread => {
-                process.stdout.write(thread.logs);
-            })
-        }
-
-        console.log('All Cypress testing threads have ended.');
-
-        let reportText = '';
-
-        // bulk of multithread report logic
-        {
-            let longestThread = { secs: -1 };
-
-            Object.values(threadsMeta).forEach((thread) => {
-                const failedTests = {};
-                let mostFailsForOneTest = 0;
-
-                // record how many tests failed, and how many times!
-                getFiles(
-                    path.join(allureResultsPath, String(thread.threadNo)),
-                ).forEach((file) => {
-                    if (file.endsWith('.json')) {
-                        try {// try catch as not all JSON files will be parseable
-                            const { status, labels, fullName } = fs.readJsonSync(file);
-
-                            if (
-                                status
-                                && labels
-                                && fullName
-                                && !['passed', 'skipped', 'unknown'].includes(status)
-                            ) {
-                                // ensure the key is wholly unique (in case two tests have the same title)
-                                const key = `${fullName}${JSON.stringify(labels)}`;
-
-                                if (!failedTests[key]) failedTests[key] = 1;
-                                else failedTests[key] += 1;
-
-                                if (failedTests[key] > mostFailsForOneTest) {
-                                    mostFailsForOneTest = failedTests[key];
-                                }
-                            }
-                        } catch (err) { }
-                    }
-
-                    // files from all threads need to be in the same directory to construct the Allure report
-                    fs.moveSync(
-                        file,
-                        path.resolve(allureResultsPath, path.basename(file)),
-                        { overwrite: true },
-                    );
-                });
-
-                threadsMeta[thread.threadNo].perfResults = {
-                    ...thread.perfResults,
-                    failedTests,
-                    naturalString: secondsToNaturalString(thread.perfResults.secs),
-                    mostFailsForOneTest
-                };
-
-                // the longest thread is used as the basis of comparison with the others
-                if (thread.perfResults.secs > longestThread.secs) {
-                    longestThread = {
-                        threadNo: thread.threadNo,
-                        naturalString: secondsToNaturalString(thread.perfResults.secs),
-                        secs: thread.perfResults.secs
-                    };
-                }
-            });
-
-            if (saveThreadBenchmark) {
-                benchmarkObj.order = Object.values(threadsMeta).filter(thread => thread.perfResults.secs).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path);
-
-                if (benchmarkObj.order.length < 2) {
-                    console.log(orange('The thread benchmark will not be updated because two or more threads are required to determine the optimal order!'));
-                } else if (Object.values(threadsMeta).length !== benchmarkObj.order.length) {
-                    console.log(orange('The thread benchmark will not be updated because one or more phases did not complete!'));
-                } else {
-                    if (JSON.stringify(savedThreadBenchmark[benchmarkId]) !== JSON.stringify(benchmarkObj)) {
-                        console.log(`Updating thread order:\n["${benchmarkObj.order.join('", "')}"]`);
-
-                        fs.writeFileSync(threadBenchmarkFilepath, `${JSON.stringify({
-                            ...savedThreadBenchmark,
-                            [benchmarkId]: benchmarkObj,
-                        }, null, 4)}\n`);
-                    } else {
-                        console.log('The results of the thread benchmark are identical to the records already saved, so the thread order doesn\'t need changing!');
-                    }
-                }
-            }
-
-            // a visual representation of how each thread performed, to show where any bottlenecks lie
-            const generateThreadBars = (timeOfLongestThread) => {
-                let str = '';
-
-                cypressConfigPhasesSorted.forEach((_, phaseIndex) => {
-                    const phaseNo = Number(phaseIndex) + 1;
-
-                    str += `[PHASE ${phaseNo}]\n\n`;
-
-                    const phaseThreads = Object.values(threadsMeta).filter(thread => thread.phaseNo === phaseNo);
-
-                    if (userSkippingPhase(phaseNo)) {
-                        str += 'Phase skipped!\n\n';
-                    } else if (!phaseThreads.length) {
-                        str += 'No spec files were found!\n\n';
-                    }
-
-                    phaseThreads.forEach((thread) => {
-                        const threadPath = thread.path;
-
-                        const threadId = Object.values(threadsMeta).length > 9 ? String(thread.threadNo).padStart(2, '0') : thread.threadNo;
-
-                        const shortThreadPath = threadPath.length > 60
-                            ? `...${threadPath.substring(threadPath.length - 57).match(/\/(.*)$/)?.[0] || threadPath.substring(threadPath.length - 57)}`
-                            : threadPath;
-
-                        threadsMeta[thread.threadNo].heading = [`Thread #${threadId} [${shortThreadPath}]`];
-
-                        str += `Thread #${threadId} [${threadPath}]\n`;
-
-                        if (threadsMeta[thread.threadNo].errorType === 'no-spec-files') {
-                            const err = 'ERROR: No spec files found!';
-                            threadsMeta[thread.threadNo].status = 'error';
-                            threadsMeta[thread.threadNo].heading.push(err);
-                            threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${thread.threadNo}`;
-                            str += `${err}\n\n`;
-                            exitCode = 1;
-                        } else if (threadsMeta[thread.threadNo].errorType === 'critical') {
-                            const err = 'CRITICAL ERROR: Thread did not complete!';
-                            threadsMeta[thread.threadNo].status = 'error';
-                            threadsMeta[thread.threadNo].heading.push(err);
-                            str += `${err}\n\n`;
-                            exitCode = 1;
-                        } else if (threadsMeta[thread.threadNo].errorType === 'timeout') {
-                            const err = `CRITICAL ERROR: Thread did not complete as it went over the time limit of ${secondsToNaturalString(threadTimeLimit)}`;
-                            threadsMeta[thread.threadNo].status = 'error';
-                            threadsMeta[thread.threadNo].heading.push(err);
-                            str += `${err}\n\n`;
-                            exitCode = 1;
-                        }
-
-                        const percentageOfTotal = (
-                            threadsMeta[thread.threadNo].perfResults.secs / timeOfLongestThread
-                        ) * 100;
-
-                        if (isNaN(percentageOfTotal)) {
-                            return;
-                        }
-
-                        const percentageBar = `${Array.from({ length: Math.round(percentageOfTotal / 2) }, () => '█').concat(
-                            Array.from({ length: 50 - Math.round(percentageOfTotal / 2) }, () => '░'),
-                        ).join('')}`;
-
-                        // log if any tests in the thread failed/retried
-                        const reportFailedTests = (obj) => {
-                            const result = [];
-
-                            if (Object.entries(obj).length) {
-                                threadsMeta[thread.threadNo].status = 'warn';
-
-                                const counts = Object.values(obj).reduce((acc, curr) => {
-                                    acc[curr] = (acc[curr] || 0) + 1;
-                                    return acc;
-                                }, {});
-
-                                Object.keys(counts).sort((a, b) => b - a).forEach((num) => {
-                                    result.push(`${counts[num]} test${counts[num] > 1 ? 's' : ''} failed ${num} time${num > 1 ? 's' : ''}`);
-                                });
-                            }
-
-                            if (threadsMeta[thread.threadNo].retries) {
-                                if (threadsMeta[thread.threadNo].status !== 'error') threadsMeta[thread.threadNo].status = 'warn';
-
-                                result.push(`the thread needed restarting ${threadsMeta[thread.threadNo].retries} time${threadsMeta[thread.threadNo].retries === 1 ? '' : 's'}`);
-                            }
-
-                            if (!result.length) {
-                                return '';
-                            }
-
-                            threadsMeta[thread.threadNo].heading.push(`WARNING: ${arrToNaturalStr(result)}`);
-                            threadsMeta[thread.threadNo].summary = `WARNING: Thread #${thread.threadNo}: ${arrToNaturalStr(result)}`;
-
-                            return ` (WARNING: ${arrToNaturalStr(result)})`;
-                        };
-
-                        str += `${percentageBar} ${percentageOfTotal.toFixed(2)}% (${threadsMeta[thread.threadNo].perfResults.naturalString})${reportFailedTests(threadsMeta[thread.threadNo].perfResults.failedTests)}\n\n`;
-                    });
-                });
-
-                return str;
-            };
-
-            reportText = `See below to compare how each thread performed.\n\n${generateThreadBars(longestThread.secs)}The percentages given above represent how much time individual threads took to complete relative to thread #${longestThread.threadNo}, which was the longest at ${longestThread.naturalString}. Any thread that takes significantly longer than others will be a bottleneck, so the closer the percentages are to one another, the better. A wide range in percentages indicates that the threads could be balanced more efficiently. Be alert as to whether any thread/test needed retrying, because that will skew the results for the affected threads.`;
-
-            console.log(`\n\n${reportText}\n\n`);
-
-            // save these logs for future reference!
-            fs.writeFileSync(path.resolve(reportDir, 'thread-performance-report.txt'), reportText);
-        }
-
-        // Overwrite the historyIds in the Allure results, as the Allure plugin's method is flawed.
-        // Doing this ensures tests across identical names are included in the report
-        // NOTE: Tests with identical names must be in different describe blocks and/or spec files
-        getFiles(allureResultsPath).forEach((file) => {
-            if (!file.endsWith('.json')) return;
-
-            try {// try catch as not all JSON files will be parseable
-                const data = fs.readJsonSync(file);
-
-                const { labels, fullName } = data;
-
-                if (data.historyId && labels.length) {
-                    data.historyId = Buffer.from(JSON.stringify(labels.concat(fullName))).toString('base64');
-
-                    fs.writeFileSync(file, JSON.stringify(data));
-                }
-            } catch (err) { }
+            }, 500);
         });
+    }
 
-        // generate the Allure report from the most recent run
-        runShellCommand('allure generate allure-results --clean -o allure-report');
+    // the maximum delay before starting the next thread
+    // the delay will be interrupted as soon as the current Cypress has started running
+    const delay = (ms) => {
+        return new Promise(resolve => threadDelayTout.setTimeout(() => {
+            if (noOfThreadsInUse < maxConcurrentThreads) {
+                resolve();
+            }
+        }, ms));
+    }
 
-        // make sure none of the tests failed!
-        {
-            const testResultsObj = fs.readJsonSync(
-                path.resolve(reportDir, 'allure-report', 'history', 'history-trend.json'),
-                'utf-8',
-            )[0].data;
+    async function runCypressTests() {
+        let threadsArr = []
+        threadsArr.push(spawnThread(1));
 
-            if (
-                testResultsObj.failed
-                + testResultsObj.broken
-                + testResultsObj.unknown !== 0
-            ) {
-                let mostFailsForOneTestAcrossAllThreads = 1;
+        if (Object.values(threadsMeta).length > 1) {
+            if (waitForFileExistFilepath) {
+                // decrease total delay by .5s as waitForFileExist will check for the file in intervals of .5s
+                await delay(threadDelay - 500 > 0 ? threadDelay - 500 : 0);
 
-                Object.entries(threadsMeta).forEach((thread) => {// determine how many times a test is allowed to fail until it gives up
-                    if (thread[1].perfResults.mostFailsForOneTest > mostFailsForOneTestAcrossAllThreads) {
-                        mostFailsForOneTestAcrossAllThreads = thread[1].perfResults.mostFailsForOneTest;
-                    }
-                });
+                await waitForFileExist();
+            } else {
+                await delay(threadDelay);
+            }
 
-                Object.keys(threadsMeta).forEach((threadNo) => {
-                    if (threadsMeta[threadNo].perfResults.mostFailsForOneTest === mostFailsForOneTestAcrossAllThreads) {
-                        threadsMeta[threadNo].status = 'error';
-                    }
-                });
+            threadsArr.push(spawnThread(2));
 
-                exitCode = 1;
+            for (const [_, thread] of Object.values(threadsMeta).slice(2).entries()) {
+                await delay(threadDelay);
+
+                if (!phaseLock || thread.phaseNo <= phaseLock) {//hack this is daft but it works
+                    threadsArr.push(spawnThread(thread.threadNo));
+                } else {
+                    break;
+                }
             }
         }
 
-        const defaultAllureReportHtml = path.resolve(defaultAllureReportDir, 'index.html');
-        const defaultAllureReportHtmlComplete = path.resolve(defaultAllureReportDir, 'complete.html');
+        await Promise.all(threadsArr)
+    }
 
-        const allureReportHtml = path.resolve(allureReportDir, 'index.html');
-        const allureReportHtmlComplete = path.resolve(allureReportDir, 'complete.html');
+    await runCypressTests();
 
-        if (fs.existsSync(defaultAllureReportHtml)) {
-            let allLogs = '';
+    if (logMode === 4) {
+        Object.values(threadsMeta).forEach(thread => {
+            process.stdout.write(thread.logs);
+        })
+    }
 
+    console.log('All Cypress testing threads have ended.');
+
+    let reportText = '';
+
+    // bulk of multithread report logic
+    {
+        let longestThread = { secs: -1 };
+
+        Object.values(threadsMeta).forEach((thread) => {
+            const failedTests = {};
+            let mostFailsForOneTest = 0;
+
+            // record how many tests failed, and how many times!
             getFiles(
-                threadLogsDir
+                path.join(allureResultsPath, String(thread.threadNo)),
             ).forEach((file) => {
-                const threadNo = file.split('_')[1].split('.txt')[0];
+                if (file.endsWith('.json')) {
+                    try {// try catch as not all JSON files will be parseable
+                        const { status, labels, fullName } = fs.readJsonSync(file);
 
-                threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading cmr-sticky"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">${threadNo === '2' && thread2ExtraLog ? `${thread2ExtraLog}\n` : ''}${fs.readFileSync(file).toString('utf8').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre></div>`;
-            });
+                        if (
+                            status
+                            && labels
+                            && fullName
+                            && !['passed', 'skipped', 'unknown'].includes(status)
+                        ) {
+                            // ensure the key is wholly unique (in case two tests have the same title)
+                            const key = `${fullName}${JSON.stringify(labels)}`;
 
-            Object.values(threadsMeta).forEach(thread => {
-                if (thread.logs) {
-                    allLogs += thread.logs;
-                }
-            })
+                            if (!failedTests[key]) failedTests[key] = 1;
+                            else failedTests[key] += 1;
 
-            const criticalErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'critical').map(o => o[0]);
-            const timeoutErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'timeout').map(o => o[0]);
-
-            const minorErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').filter(o => !['critical', 'timeout'].includes(o[1].errorType)).map(o => o[0]);
-            const allErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').map(o => o[0]);
-            const warnThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'warn').map(o => o[0]);
-
-            const status = (() => {
-                if (allErrorThreads.length) return 'error';
-                if (warnThreads.length) return 'warn';
-                return 'success';
-            })();
-
-            const cmrAllureBody = `<body>
-            <div class="cmr-content cmr-header">
-                <div class="cmr-${status}"><h2>Cypress Multithreaded Runner${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
-                ${(criticalErrorThreads.length || timeoutErrorThreads.length) ? `
-                <div class="cmr-error">
-                    Be advised! This Allure report doesn't tell the full story. ${phaseLock ? `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>` : ''}${criticalErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete!` : ''}${timeoutErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</strong> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.` : ''} Therefore, one or more spec files may have not been fully tested! Scroll down to read the full logs from the separate threads.
-                </div>` : ''}
-                ${minorErrorThreads.length ? `
-                <div class="cmr-error">
-                    ${minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${(!criticalErrorThreads.length && !timeoutErrorThreads.length) ? '<br>Scroll down to read the full logs from the separate threads.' : ''}
-                </div>` : ''}
-                ${warnThreads.length ? `
-                <div class="cmr-warn">
-                    ${warnThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${status === 'warn' ? '<br>Scroll down to read the full logs from the separate threads.' : ''}
-                </div>` : ''}
-                ${status === 'success' ? `
-                <div class="cmr-success">
-                    Everything seems completely fine! No tests needed retrying. Scroll down to read the full logs from the separate threads.
-                </div>
-                `: ''}
-                ${reportHeadNotes.length ? `
-                <div class="cmr-notes">
-                    ${reportHeadNotes.map(note => `NOTE: ${note}`).join('<br>')}
-                </div>` : ''}
-            </div>`;
-
-            const cmrAllureFooter = `<div class="cmr-content cmr-footer">${allLogs
-                .replace(/Couldn't find tsconfig.json. tsconfig-paths will be skipped\n/g, '')// this warning is noisy, remove it
-                .replace(/tput: No value for \$TERM and no -T specified\n/g, '')// this warning is noisy, remove it
-                }<div class="cmr-report"><button id="cmr-open-all">Open all logs above</button><button id="cmr-close-all">Close all logs above</button><br><br><h2 class="cmr-sticky">Thread Performance Summary</h2><pre>${reportText}</pre></div></div>
-            
-                <style>
-                .cmr-content #cmr-close-all {
-                    margin-left: 20px;
-                }
-                .cmr-footer h2 {
-                  margin-bottom: 0;
-                }
-            
-                .cmr-content h2 {
-                  margin-top: 0;
+                            if (failedTests[key] > mostFailsForOneTest) {
+                                mostFailsForOneTest = failedTests[key];
+                            }
+                        }
+                    } catch (err) { }
                 }
 
-                .cmr-header h2 {
-                    margin: 0;
-                }
-            
-                .cmr-content div:nth-child(even) {
-                  filter: brightness(0.92);
-                }
-            
-                .cmr-content pre {
-                  overflow-wrap: break-word;
-                }
-            
-                .cmr-content div {
-                  padding: 20px;
-                  background: white;
-                  min-width: 890px;
-                  display: block;
-                }
-            
-                .cmr-content div.cmr-error {
-                  background: #fd5a3e;
-                }
-            
-                .cmr-content div.cmr-warn {
-                  background: #ffbe11;
-                }
-            
-                .cmr-content div.cmr-success {
-                  background: #97cc64;
-                }
-
-                .cmr-content div.cmr-notes {
-                  background: #aaa;
-                }
-            
-                .cmr-content .cmr-pre-heading {
-                  cursor: pointer;
-                }
-
-                .cmr-content .cmr-sticky {
-                    display: flex;
-                    gap: 10px;
-                    position: sticky;
-                    top: 0;
-                    margin-left: -1px;
-                    padding-left: 1px;
-                    background: inherit;
-                }
-
-                .cmr-content button {
-                    background: rgb(239, 239, 239);
-                    border: 1px solid grey;
-                    padding: 5px;
-                    border-radius: 6px;
-                }
-              </style>
-              <script>
-                [...document.querySelectorAll('.cmr-pre-heading')].forEach((heading, index) => {
-                  const thisIndex = index + 1;
-            
-                  heading.addEventListener('click', () => {
-                    heading.classList.toggle('cmr-pre-heading-active');
-
-                    const thisPre = document.querySelector('#cmr-pre-' + thisIndex);
-                    const thisArr = document.querySelector('#cmr-arr-' + thisIndex);
-            
-                    if (thisPre.style.display === 'none') {
-                      thisPre.style.removeProperty('display');
-                      thisArr.innerHTML = '⬇️';
-                    } else {
-                      thisPre.style.display = 'none';
-                      thisArr.innerHTML = '➡️';
-                    }
-                  });
-                });
-
-                function getScrollHeightFromBottom(){
-                    return Math.ceil(document.documentElement.scrollHeight - window.innerHeight - window.pageYOffset);
-                }
-
-                document.querySelector('#cmr-open-all').addEventListener('click', () => {
-                    const scrollBef=getScrollHeightFromBottom();
-                    [...document.querySelectorAll('.cmr-pre-heading:not(.cmr-pre-heading-active)')].forEach((heading)=>{heading.click()});
-                    window.scrollTo(0,999999999);
-                    window.scrollBy(0,-scrollBef);
-                });
-
-                document.querySelector('#cmr-close-all').addEventListener('click', () => {
-                    const scrollBef=getScrollHeightFromBottom();
-                    [...document.querySelectorAll('.cmr-pre-heading-active')].forEach((heading)=>{heading.click()});
-                    window.scrollTo(0,999999999);
-                    window.scrollBy(0,-scrollBef);
-                });
-                </script>
-            </body>`;
-
-            fs.writeFileSync(
-                defaultAllureReportHtml,
-                fs.readFileSync(defaultAllureReportHtml)
-                    .toString('utf8')
-                    .replace(/.*(googletagmanager|gtag|dataLayer|<script>|\n<\/script>).*/gm, '')// hack to remove some dodgy html that breaks allure-combine
-            )
-
-            let combinedAllureSuccessfully = false;
-
-            if (combineAllure) {
-                try {
-                    runShellCommand('pip install --upgrade allure-combine && allure-combine allure-report');
-
-                    fs.writeFileSync(
-                        defaultAllureReportHtmlComplete,
-                        fs.readFileSync(defaultAllureReportHtmlComplete)
-                            .toString('utf8')
-                            .replace('<body>', cmrAllureBody)
-                            .replace('</body>', cmrAllureFooter)
-                    );
-
-                    console.log(green(`The Allure report for this run has been bundled into a single HTML file: "${allureReportHtmlComplete}"`));
-
-                    combinedAllureSuccessfully = true;
-                } catch (err) {
-                    console.log(red('Error when attempting to bundle the Allure report into a single file! You might not have pip installed. See the readme for more details.'));
-                }
-            }
-
-            // we add our custom elements into the HTML AFTER allure-combine because allure-combine will crash otherwise!
-            fs.writeFileSync(
-                defaultAllureReportHtml,
-                fs.readFileSync(defaultAllureReportHtml)
-                    .toString('utf8')
-                    .replace('<body>', cmrAllureBody)
-                    .replace('</body>', cmrAllureFooter)
-            );
-
-            if (allureReportDir !== defaultAllureReportDir) {
+                // files from all threads need to be in the same directory to construct the Allure report
                 fs.moveSync(
-                    defaultAllureReportDir,
-                    allureReportDir,
+                    file,
+                    path.resolve(allureResultsPath, path.basename(file)),
                     { overwrite: true },
                 );
-            }
+            });
 
-            // host the Allure report as a localhost
-            if (hostAllure) {
-                runShellCommand(`allure open "${path.resolve(allureReportDir)}"`);
-            } else if (openAllure) {
-                if (combinedAllureSuccessfully) {
-                    runShellCommand(`open "${allureReportHtmlComplete}"`);
+            threadsMeta[thread.threadNo].perfResults = {
+                ...thread.perfResults,
+                failedTests,
+                naturalString: secondsToNaturalString(thread.perfResults.secs),
+                mostFailsForOneTest
+            };
+
+            // the longest thread is used as the basis of comparison with the others
+            if (thread.perfResults.secs > longestThread.secs) {
+                longestThread = {
+                    threadNo: thread.threadNo,
+                    naturalString: secondsToNaturalString(thread.perfResults.secs),
+                    secs: thread.perfResults.secs
+                };
+            }
+        });
+
+        if (saveThreadBenchmark) {
+            benchmarkObj.order = Object.values(threadsMeta).filter(thread => thread.perfResults.secs).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path);
+
+            if (benchmarkObj.order.length < 2) {
+                console.log(orange('The thread benchmark will not be updated because two or more threads are required to determine the optimal order!'));
+            } else if (Object.values(threadsMeta).length !== benchmarkObj.order.length) {
+                console.log(orange('The thread benchmark will not be updated because one or more phases did not complete!'));
+            } else {
+                if (JSON.stringify(savedThreadBenchmark[benchmarkId]) !== JSON.stringify(benchmarkObj)) {
+                    console.log(`Updating thread order:\n["${benchmarkObj.order.join('", "')}"]`);
+
+                    fs.writeFileSync(threadBenchmarkFilepath, `${JSON.stringify({
+                        ...savedThreadBenchmark,
+                        [benchmarkId]: benchmarkObj,
+                    }, null, 4)}\n`);
                 } else {
-                    runShellCommand(`open "${allureReportHtml}"`);
+                    console.log('The results of the thread benchmark are identical to the records already saved, so the thread order doesn\'t need changing!');
                 }
             }
-
-            console.log(green(`The Allure report for this run has been saved to the following directory: "${allureReportDir}"`));
         }
 
-        if (fullConfig.waitForFileExist?.deleteAfterCompletion) {
-            if (fs.existsSync(waitForFileExistFilepath)) {
-                fs.unlinkSync(waitForFileExistFilepath);
+        // a visual representation of how each thread performed, to show where any bottlenecks lie
+        const generateThreadBars = (timeOfLongestThread) => {
+            let str = '';
+
+            cypressConfigPhasesSorted.forEach((_, phaseIndex) => {
+                const phaseNo = Number(phaseIndex) + 1;
+
+                str += `[PHASE ${phaseNo}]\n\n`;
+
+                const phaseThreads = Object.values(threadsMeta).filter(thread => thread.phaseNo === phaseNo);
+
+                if (userSkippingPhase(phaseNo)) {
+                    str += 'Phase skipped!\n\n';
+                } else if (!phaseThreads.length) {
+                    str += 'No spec files were found!\n\n';
+                }
+
+                phaseThreads.forEach((thread) => {
+                    const threadPath = thread.path;
+
+                    const threadId = Object.values(threadsMeta).length > 9 ? String(thread.threadNo).padStart(2, '0') : thread.threadNo;
+
+                    const shortThreadPath = threadPath.length > 60
+                        ? `...${threadPath.substring(threadPath.length - 57).match(/\/(.*)$/)?.[0] || threadPath.substring(threadPath.length - 57)}`
+                        : threadPath;
+
+                    threadsMeta[thread.threadNo].heading = [`Thread #${threadId} [${shortThreadPath}]`];
+
+                    str += `Thread #${threadId} [${threadPath}]\n`;
+
+                    if (threadsMeta[thread.threadNo].errorType === 'no-spec-files') {
+                        const err = 'ERROR: No spec files found!';
+                        threadsMeta[thread.threadNo].status = 'error';
+                        threadsMeta[thread.threadNo].heading.push(err);
+                        threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${thread.threadNo}`;
+                        str += `${err}\n\n`;
+                        exitCode = 1;
+                    } else if (threadsMeta[thread.threadNo].errorType === 'critical') {
+                        const err = 'CRITICAL ERROR: Thread did not complete!';
+                        threadsMeta[thread.threadNo].status = 'error';
+                        threadsMeta[thread.threadNo].heading.push(err);
+                        str += `${err}\n\n`;
+                        exitCode = 1;
+                    } else if (threadsMeta[thread.threadNo].errorType === 'timeout') {
+                        const err = `CRITICAL ERROR: Thread did not complete as it went over the time limit of ${secondsToNaturalString(threadTimeLimit)}`;
+                        threadsMeta[thread.threadNo].status = 'error';
+                        threadsMeta[thread.threadNo].heading.push(err);
+                        str += `${err}\n\n`;
+                        exitCode = 1;
+                    }
+
+                    const percentageOfTotal = (
+                        threadsMeta[thread.threadNo].perfResults.secs / timeOfLongestThread
+                    ) * 100;
+
+                    if (isNaN(percentageOfTotal)) {
+                        return;
+                    }
+
+                    const percentageBar = `${Array.from({ length: Math.round(percentageOfTotal / 2) }, () => '█').concat(
+                        Array.from({ length: 50 - Math.round(percentageOfTotal / 2) }, () => '░'),
+                    ).join('')}`;
+
+                    // log if any tests in the thread failed/retried
+                    const reportFailedTests = (obj) => {
+                        const result = [];
+
+                        if (Object.entries(obj).length) {
+                            threadsMeta[thread.threadNo].status = 'warn';
+
+                            const counts = Object.values(obj).reduce((acc, curr) => {
+                                acc[curr] = (acc[curr] || 0) + 1;
+                                return acc;
+                            }, {});
+
+                            Object.keys(counts).sort((a, b) => b - a).forEach((num) => {
+                                result.push(`${counts[num]} test${counts[num] > 1 ? 's' : ''} failed ${num} time${num > 1 ? 's' : ''}`);
+                            });
+                        }
+
+                        if (threadsMeta[thread.threadNo].retries) {
+                            if (threadsMeta[thread.threadNo].status !== 'error') threadsMeta[thread.threadNo].status = 'warn';
+
+                            result.push(`the thread needed restarting ${threadsMeta[thread.threadNo].retries} time${threadsMeta[thread.threadNo].retries === 1 ? '' : 's'}`);
+                        }
+
+                        if (!result.length) {
+                            return '';
+                        }
+
+                        threadsMeta[thread.threadNo].heading.push(`WARNING: ${arrToNaturalStr(result)}`);
+                        threadsMeta[thread.threadNo].summary = `WARNING: Thread #${thread.threadNo}: ${arrToNaturalStr(result)}`;
+
+                        return ` (WARNING: ${arrToNaturalStr(result)})`;
+                    };
+
+                    str += `${percentageBar} ${percentageOfTotal.toFixed(2)}% (${threadsMeta[thread.threadNo].perfResults.naturalString})${reportFailedTests(threadsMeta[thread.threadNo].perfResults.failedTests)}\n\n`;
+                });
+            });
+
+            return str;
+        };
+
+        reportText = `See below to compare how each thread performed.\n\n${generateThreadBars(longestThread.secs)}The percentages given above represent how much time individual threads took to complete relative to thread #${longestThread.threadNo}, which was the longest at ${longestThread.naturalString}. Any thread that takes significantly longer than others will be a bottleneck, so the closer the percentages are to one another, the better. A wide range in percentages indicates that the threads could be balanced more efficiently. Be alert as to whether any thread/test needed retrying, because that will skew the results for the affected threads.`;
+
+        console.log(`\n\n${reportText}\n\n`);
+
+        // save these logs for future reference!
+        fs.writeFileSync(path.resolve(reportDir, 'thread-performance-report.txt'), reportText);
+    }
+
+    // Overwrite the historyIds in the Allure results, as the Allure plugin's method is flawed.
+    // Doing this ensures tests across identical names are included in the report
+    // NOTE: Tests with identical names must be in different describe blocks and/or spec files
+    getFiles(allureResultsPath).forEach((file) => {
+        if (!file.endsWith('.json')) return;
+
+        try {// try catch as not all JSON files will be parseable
+            const data = fs.readJsonSync(file);
+
+            const { labels, fullName } = data;
+
+            if (data.historyId && labels.length) {
+                data.historyId = Buffer.from(JSON.stringify(labels.concat(fullName))).toString('base64');
+
+                fs.writeFileSync(file, JSON.stringify(data));
+            }
+        } catch (err) { }
+    });
+
+    // generate the Allure report from the most recent run
+    runShellCommand('allure generate allure-results --clean -o allure-report');
+
+    // make sure none of the tests failed!
+    {
+        const testResultsObj = fs.readJsonSync(
+            path.resolve(reportDir, 'allure-report', 'history', 'history-trend.json'),
+            'utf-8',
+        )[0].data;
+
+        if (
+            testResultsObj.failed
+            + testResultsObj.broken
+            + testResultsObj.unknown !== 0
+        ) {
+            let mostFailsForOneTestAcrossAllThreads = 1;
+
+            Object.entries(threadsMeta).forEach((thread) => {// determine how many times a test is allowed to fail until it gives up
+                if (thread[1].perfResults.mostFailsForOneTest > mostFailsForOneTestAcrossAllThreads) {
+                    mostFailsForOneTestAcrossAllThreads = thread[1].perfResults.mostFailsForOneTest;
+                }
+            });
+
+            Object.keys(threadsMeta).forEach((threadNo) => {
+                if (threadsMeta[threadNo].perfResults.mostFailsForOneTest === mostFailsForOneTestAcrossAllThreads) {
+                    threadsMeta[threadNo].status = 'error';
+                }
+            });
+
+            exitCode = 1;
+        }
+    }
+
+    const defaultAllureReportHtml = path.resolve(defaultAllureReportDir, 'index.html');
+    const defaultAllureReportHtmlComplete = path.resolve(defaultAllureReportDir, 'complete.html');
+
+    const allureReportHtml = path.resolve(allureReportDir, 'index.html');
+    const allureReportHtmlComplete = path.resolve(allureReportDir, 'complete.html');
+
+    if (fs.existsSync(defaultAllureReportHtml)) {
+        let allLogs = '';
+
+        getFiles(
+            threadLogsDir
+        ).forEach((file) => {
+            const threadNo = file.split('_')[1].split('.txt')[0];
+
+            threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading cmr-sticky"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">${threadNo === '2' && thread2ExtraLog ? `${thread2ExtraLog}\n` : ''}${fs.readFileSync(file).toString('utf8').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre></div>`;
+        });
+
+        Object.values(threadsMeta).forEach(thread => {
+            if (thread.logs) {
+                allLogs += thread.logs;
+            }
+        })
+
+        const criticalErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'critical').map(o => o[0]);
+        const timeoutErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'timeout').map(o => o[0]);
+
+        const minorErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').filter(o => !['critical', 'timeout'].includes(o[1].errorType)).map(o => o[0]);
+        const allErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').map(o => o[0]);
+        const warnThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'warn').map(o => o[0]);
+
+        const status = (() => {
+            if (allErrorThreads.length) return 'error';
+            if (warnThreads.length) return 'warn';
+            return 'success';
+        })();
+
+        const cmrAllureBody = `<body>
+                <div class="cmr-content cmr-header">
+                    <div class="cmr-${status}"><h2>Cypress Multithreaded Runner${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
+                    ${(criticalErrorThreads.length || timeoutErrorThreads.length) ? `
+                    <div class="cmr-error">
+                        Be advised! This Allure report doesn't tell the full story. ${phaseLock ? `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>` : ''}${criticalErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete!` : ''}${timeoutErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</strong> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.` : ''} Therefore, one or more spec files may have not been fully tested! Scroll down to read the full logs from the separate threads.
+                    </div>` : ''}
+                    ${minorErrorThreads.length ? `
+                    <div class="cmr-error">
+                        ${minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${(!criticalErrorThreads.length && !timeoutErrorThreads.length) ? '<br>Scroll down to read the full logs from the separate threads.' : ''}
+                    </div>` : ''}
+                    ${warnThreads.length ? `
+                    <div class="cmr-warn">
+                        ${warnThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${status === 'warn' ? '<br>Scroll down to read the full logs from the separate threads.' : ''}
+                    </div>` : ''}
+                    ${status === 'success' ? `
+                    <div class="cmr-success">
+                        Everything seems completely fine! No tests needed retrying. Scroll down to read the full logs from the separate threads.
+                    </div>
+                    `: ''}
+                    ${reportHeadNotes.length ? `
+                    <div class="cmr-notes">
+                        ${reportHeadNotes.map(note => `NOTE: ${note}`).join('<br>')}
+                    </div>` : ''}
+                </div>`;
+
+        const cmrAllureFooter = `<div class="cmr-content cmr-footer">${allLogs
+            .replace(/Couldn't find tsconfig.json. tsconfig-paths will be skipped\n/g, '')// this warning is noisy, remove it
+            .replace(/tput: No value for \$TERM and no -T specified\n/g, '')// this warning is noisy, remove it
+            }<div class="cmr-report"><button id="cmr-open-all">Open all logs above</button><button id="cmr-close-all">Close all logs above</button><br><br><h2 class="cmr-sticky">Thread Performance Summary</h2><pre>${reportText}</pre></div></div>
+                
+                    <style>
+                    .cmr-content #cmr-close-all {
+                        margin-left: 20px;
+                    }
+                    .cmr-footer h2 {
+                      margin-bottom: 0;
+                    }
+                
+                    .cmr-content h2 {
+                      margin-top: 0;
+                    }
+    
+                    .cmr-header h2 {
+                        margin: 0;
+                    }
+                
+                    .cmr-content div:nth-child(even) {
+                      filter: brightness(0.92);
+                    }
+                
+                    .cmr-content pre {
+                      overflow-wrap: break-word;
+                    }
+                
+                    .cmr-content div {
+                      padding: 20px;
+                      background: white;
+                      min-width: 890px;
+                      display: block;
+                    }
+                
+                    .cmr-content div.cmr-error {
+                      background: #fd5a3e;
+                    }
+                
+                    .cmr-content div.cmr-warn {
+                      background: #ffbe11;
+                    }
+                
+                    .cmr-content div.cmr-success {
+                      background: #97cc64;
+                    }
+    
+                    .cmr-content div.cmr-notes {
+                      background: #aaa;
+                    }
+                
+                    .cmr-content .cmr-pre-heading {
+                      cursor: pointer;
+                    }
+    
+                    .cmr-content .cmr-sticky {
+                        display: flex;
+                        gap: 10px;
+                        position: sticky;
+                        top: 0;
+                        margin-left: -1px;
+                        padding-left: 1px;
+                        background: inherit;
+                    }
+    
+                    .cmr-content button {
+                        background: rgb(239, 239, 239);
+                        border: 1px solid grey;
+                        padding: 5px;
+                        border-radius: 6px;
+                    }
+                  </style>
+                  <script>
+                    [...document.querySelectorAll('.cmr-pre-heading')].forEach((heading, index) => {
+                      const thisIndex = index + 1;
+                
+                      heading.addEventListener('click', () => {
+                        heading.classList.toggle('cmr-pre-heading-active');
+    
+                        const thisPre = document.querySelector('#cmr-pre-' + thisIndex);
+                        const thisArr = document.querySelector('#cmr-arr-' + thisIndex);
+                
+                        if (thisPre.style.display === 'none') {
+                          thisPre.style.removeProperty('display');
+                          thisArr.innerHTML = '⬇️';
+                        } else {
+                          thisPre.style.display = 'none';
+                          thisArr.innerHTML = '➡️';
+                        }
+                      });
+                    });
+    
+                    function getScrollHeightFromBottom(){
+                        return Math.ceil(document.documentElement.scrollHeight - window.innerHeight - window.pageYOffset);
+                    }
+    
+                    document.querySelector('#cmr-open-all').addEventListener('click', () => {
+                        const scrollBef=getScrollHeightFromBottom();
+                        [...document.querySelectorAll('.cmr-pre-heading:not(.cmr-pre-heading-active)')].forEach((heading)=>{heading.click()});
+                        window.scrollTo(0,999999999);
+                        window.scrollBy(0,-scrollBef);
+                    });
+    
+                    document.querySelector('#cmr-close-all').addEventListener('click', () => {
+                        const scrollBef=getScrollHeightFromBottom();
+                        [...document.querySelectorAll('.cmr-pre-heading-active')].forEach((heading)=>{heading.click()});
+                        window.scrollTo(0,999999999);
+                        window.scrollBy(0,-scrollBef);
+                    });
+                    </script>
+                </body>`;
+
+        fs.writeFileSync(
+            defaultAllureReportHtml,
+            fs.readFileSync(defaultAllureReportHtml)
+                .toString('utf8')
+                .replace(/.*(googletagmanager|gtag|dataLayer|<script>|\n<\/script>).*/gm, '')// hack to remove some dodgy html that breaks allure-combine
+        )
+
+        let combinedAllureSuccessfully = false;
+
+        if (combineAllure) {
+            try {
+                runShellCommand('pip install --upgrade allure-combine && allure-combine allure-report');
+
+                fs.writeFileSync(
+                    defaultAllureReportHtmlComplete,
+                    fs.readFileSync(defaultAllureReportHtmlComplete)
+                        .toString('utf8')
+                        .replace('<body>', cmrAllureBody)
+                        .replace('</body>', cmrAllureFooter)
+                );
+
+                console.log(green(`The Allure report for this run has been bundled into a single HTML file: "${allureReportHtmlComplete}"`));
+
+                combinedAllureSuccessfully = true;
+            } catch (err) {
+                console.log(red('Error when attempting to bundle the Allure report into a single file! You might not have pip installed. See the readme for more details.'));
             }
         }
 
+        // we add our custom elements into the HTML AFTER allure-combine because allure-combine will crash otherwise!
+        fs.writeFileSync(
+            defaultAllureReportHtml,
+            fs.readFileSync(defaultAllureReportHtml)
+                .toString('utf8')
+                .replace('<body>', cmrAllureBody)
+                .replace('</body>', cmrAllureFooter)
+        );
+
+        if (allureReportDir !== defaultAllureReportDir) {
+            fs.moveSync(
+                defaultAllureReportDir,
+                allureReportDir,
+                { overwrite: true },
+            );
+        }
+
+        // host the Allure report as a localhost
+        if (hostAllure) {
+            runShellCommand(`allure open "${path.resolve(allureReportDir)}"`);
+        } else if (openAllure) {
+            if (combinedAllureSuccessfully) {
+                runShellCommand(`open "${allureReportHtmlComplete}"`);
+            } else {
+                runShellCommand(`open "${allureReportHtml}"`);
+            }
+        }
+
+        console.log(green(`The Allure report for this run has been saved to the following directory: "${allureReportDir}"`));
+    }
+
+    if (fullConfig.waitForFileExist?.deleteAfterCompletion) {
+        if (fs.existsSync(waitForFileExistFilepath)) {
+            fs.unlinkSync(waitForFileExistFilepath);
+        }
+    }
+
+    if (endProcessIfTestsFail && exitCode) {
         process.exit(exitCode);
-    })();
+    }
+
+    return new Promise((resolve) => resolve(exitCode));
 }
