@@ -1,5 +1,8 @@
 // NOTE: Comments and general structure of this file are WIP
 
+const { importAll } = require('./lib/importAll.js');
+importAll().from('./common.js');
+
 const fs = require('fs-extra');
 
 const { execSync, spawn } = require('child_process');
@@ -86,13 +89,6 @@ const getFilesRecursive = (srcpath, arrayOfFiles = []) => {
     return arrayOfFiles;
 }
 
-const secondsToNaturalString = (seconds) => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds - (minutes * 60);
-
-    return `${minutes ? `${minutes} minute${minutes !== 1 ? 's' : ''}, ` : ''}${remainingSeconds} second${seconds !== 1 ? 's' : ''}`;
-};
-
 let SuperTout = class {
     #_tout;
     #_callback;
@@ -120,11 +116,9 @@ const filterObj = (obj) => {
 }
 
 module.exports = async (config = {}) => {
-    const fullConfig = require('./lib/process-args').getFullConfig(config);
+    const startTime = performance.now();
 
-    (fullConfig.ignoreCliOverrides || []).forEach(prop => {
-        fullConfig[prop] = config[prop];
-    });
+    const fullConfig = getFullConfig(config);
 
     const reportDir = fullConfig.reportDir ? path.join(fullConfig.reportDir) : null;
     const maxThreadRestarts = fullConfig.maxThreadRestarts ?? 5;
@@ -145,6 +139,8 @@ module.exports = async (config = {}) => {
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
     const benchmarkDescription = fullConfig.benchmarkDescription ?? null;
     const specFiles = fullConfig.specFiles ?? null;
+
+    const generateAllure = fullConfig.generateAllure ?? true;
 
     const endProcessIfTestsFail = fullConfig.endProcessIfTestsFail ?? true;
 
@@ -213,9 +209,9 @@ module.exports = async (config = {}) => {
 
     const benchmarkId = btoa(JSON.stringify(benchmarkObj));
 
-    const openAllure = fullConfig.openAllure || fullConfig.open || false;
-    const combineAllure = fullConfig.combineAllure || fullConfig.combine || false;
-    const hostAllure = fullConfig.hostAllure || fullConfig.host || false;
+    const openAllure = fullConfig.openAllure || false;
+    const combineAllure = fullConfig.combineAllure || false;
+    const hostAllure = fullConfig.hostAllure || false;
 
     const defaultAllureReportDir = path.join(reportDir, 'allure-report');
     const allureReportDir = fullConfig.allureReportDir ? path.join(fullConfig.allureReportDir) : defaultAllureReportDir;
@@ -232,6 +228,10 @@ module.exports = async (config = {}) => {
     let thread2ExtraLog = '';
 
     let exitCode = 0;
+
+    if (fullConfig.maxConcurrentThreadsExperiment) {
+        console.warn(orange('WARNING: maxConcurrentThreadsExperiment will not work when run through the async mode'));
+    }
 
     const cypressConfigPhasesUnsorted = phases.map(phase => {
         const specs = (() => {
@@ -381,7 +381,7 @@ module.exports = async (config = {}) => {
 
     initLogs.push(`A maximum of ${Object.values(threadsMeta).length < maxConcurrentThreads ? Object.values(threadsMeta).length : maxConcurrentThreads} threads will be used at any one time.\nThis code is executing on a machine with ${require('os').cpus().length} logical CPU threads.`);
 
-    if (repeat) {
+    if (repeat > 1) {
         initLogs.push(green(`Repeat is set to ${repeat}. Therefore, all threads in all phases will run ${repeat} times, regardless of whether the tests pass or fail.`));
     }
 
@@ -590,9 +590,7 @@ module.exports = async (config = {}) => {
             threadDelayTout.clearTimeout();// todo this doesn't consider whether another thread is currently restarting and so may end a timeout early, but it doesn't really matter...
             threadsMeta[threadNo].complete = true;
             threadsMeta[threadNo].pid = false;
-            threadsMeta[threadNo].perfResults.secs = parseInt(
-                (performance.now() - threadsMeta[threadNo].perfResults.startTime) / 1000
-            );
+            threadsMeta[threadNo].perfResults.secs = timeDifference(performance.now(), threadsMeta[threadNo].perfResults.startTime);
         }
 
         return new Promise((resolve) => {
@@ -719,7 +717,7 @@ module.exports = async (config = {}) => {
         })
     }
 
-    console.log('All Cypress testing threads have ended.');
+    console.log(`All Cypress testing threads have ended after ${secondsToNaturalString(timeDifference(performance.now(), startTime))}.`);
 
     let reportText = '';
 
@@ -769,7 +767,6 @@ module.exports = async (config = {}) => {
             threadsMeta[thread.threadNo].perfResults = {
                 ...thread.perfResults,
                 failedTests,
-                naturalString: secondsToNaturalString(thread.perfResults.secs),
                 mostFailsForOneTest
             };
 
@@ -863,10 +860,6 @@ module.exports = async (config = {}) => {
                         return;
                     }
 
-                    const percentageBar = `${Array.from({ length: Math.round(percentageOfTotal / 2) }, () => '█').concat(
-                        Array.from({ length: 50 - Math.round(percentageOfTotal / 2) }, () => '░'),
-                    ).join('')}`;
-
                     // log if any tests in the thread failed/retried
                     const reportFailedTests = (obj) => {
                         const result = [];
@@ -900,7 +893,7 @@ module.exports = async (config = {}) => {
                         return ` (WARNING: ${arrToNaturalStr(result)})`;
                     };
 
-                    str += `${percentageBar} ${percentageOfTotal.toFixed(2)}% (${threadsMeta[thread.threadNo].perfResults.naturalString})${reportFailedTests(threadsMeta[thread.threadNo].perfResults.failedTests)}\n\n`;
+                    str += `${generatePercentageBar(percentageOfTotal, threadsMeta[thread.threadNo].perfResults.secs)}${reportFailedTests(threadsMeta[thread.threadNo].perfResults.failedTests)}\n\n`;
                 });
             });
 
@@ -967,43 +960,44 @@ module.exports = async (config = {}) => {
         }
     }
 
-    const defaultAllureReportHtml = path.resolve(defaultAllureReportDir, 'index.html');
-    const defaultAllureReportHtmlComplete = path.resolve(defaultAllureReportDir, 'complete.html');
+    if (generateAllure) {
+        const defaultAllureReportHtml = path.resolve(defaultAllureReportDir, 'index.html');
+        const defaultAllureReportHtmlComplete = path.resolve(defaultAllureReportDir, 'complete.html');
 
-    const allureReportHtml = path.resolve(allureReportDir, 'index.html');
-    const allureReportHtmlComplete = path.resolve(allureReportDir, 'complete.html');
+        const allureReportHtml = path.resolve(allureReportDir, 'index.html');
+        const allureReportHtmlComplete = path.resolve(allureReportDir, 'complete.html');
 
-    if (fs.existsSync(defaultAllureReportHtml)) {
-        let allLogs = '';
+        if (fs.existsSync(defaultAllureReportHtml)) {
+            let allLogs = '';
 
-        getFiles(
-            threadLogsDir
-        ).forEach((file) => {
-            const threadNo = file.split('_')[1].split('.txt')[0];
+            getFiles(
+                threadLogsDir
+            ).forEach((file) => {
+                const threadNo = file.split('_')[1].split('.txt')[0];
 
-            threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading cmr-sticky"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">${threadNo === '2' && thread2ExtraLog ? `${thread2ExtraLog}\n` : ''}${fs.readFileSync(file).toString('utf8').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre></div>`;
-        });
+                threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading cmr-sticky"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">${threadNo === '2' && thread2ExtraLog ? `${thread2ExtraLog}\n` : ''}${fs.readFileSync(file).toString('utf8').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre></div>`;
+            });
 
-        Object.values(threadsMeta).forEach(thread => {
-            if (thread.logs) {
-                allLogs += thread.logs;
-            }
-        })
+            Object.values(threadsMeta).forEach(thread => {
+                if (thread.logs) {
+                    allLogs += thread.logs;
+                }
+            })
 
-        const criticalErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'critical').map(o => o[0]);
-        const timeoutErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'timeout').map(o => o[0]);
+            const criticalErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'critical').map(o => o[0]);
+            const timeoutErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'timeout').map(o => o[0]);
 
-        const minorErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').filter(o => !['critical', 'timeout'].includes(o[1].errorType)).map(o => o[0]);
-        const allErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').map(o => o[0]);
-        const warnThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'warn').map(o => o[0]);
+            const minorErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').filter(o => !['critical', 'timeout'].includes(o[1].errorType)).map(o => o[0]);
+            const allErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').map(o => o[0]);
+            const warnThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'warn').map(o => o[0]);
 
-        const status = (() => {
-            if (allErrorThreads.length) return 'error';
-            if (warnThreads.length) return 'warn';
-            return 'success';
-        })();
+            const status = (() => {
+                if (allErrorThreads.length) return 'error';
+                if (warnThreads.length) return 'warn';
+                return 'success';
+            })();
 
-        const cmrAllureBody = `<body>
+            const cmrAllureBody = `<body>
                 <div class="cmr-content cmr-header">
                     <div class="cmr-${status}"><h2>Cypress Multithreaded Runner${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
                     ${(criticalErrorThreads.length || timeoutErrorThreads.length) ? `
@@ -1029,62 +1023,62 @@ module.exports = async (config = {}) => {
                     </div>` : ''}
                 </div>`;
 
-        const cmrAllureFooter = `<div class="cmr-content cmr-footer">${allLogs
-            .replace(/Couldn't find tsconfig.json. tsconfig-paths will be skipped\n/g, '')// this warning is noisy, remove it
-            .replace(/tput: No value for \$TERM and no -T specified\n/g, '')// this warning is noisy, remove it
-            }<div class="cmr-report"><button id="cmr-open-all">Open all logs above</button><button id="cmr-close-all">Close all logs above</button><br><br><h2 class="cmr-sticky">Thread Performance Summary</h2><pre>${reportText}</pre></div></div>
+            const cmrAllureFooter = `<div class="cmr-content cmr-footer">${allLogs
+                .replace(/Couldn't find tsconfig.json. tsconfig-paths will be skipped\n/g, '')// this warning is noisy, remove it
+                .replace(/tput: No value for \$TERM and no -T specified\n/g, '')// this warning is noisy, remove it
+                }<div class="cmr-report"><button id="cmr-open-all">Open all logs above</button><button id="cmr-close-all">Close all logs above</button><br><br><h2 class="cmr-sticky">Thread Performance Summary</h2><pre>${reportText}</pre></div></div>
                 
                     <style>
                     .cmr-content #cmr-close-all {
                         margin-left: 20px;
                     }
                     .cmr-footer h2 {
-                      margin-bottom: 0;
+                        margin-bottom: 0;
                     }
                 
                     .cmr-content h2 {
-                      margin-top: 0;
+                        margin-top: 0;
                     }
-    
+
                     .cmr-header h2 {
                         margin: 0;
                     }
                 
                     .cmr-content div:nth-child(even) {
-                      filter: brightness(0.92);
+                        filter: brightness(0.92);
                     }
                 
                     .cmr-content pre {
-                      overflow-wrap: break-word;
+                        overflow-wrap: break-word;
                     }
                 
                     .cmr-content div {
-                      padding: 20px;
-                      background: white;
-                      min-width: 890px;
-                      display: block;
+                        padding: 20px;
+                        background: white;
+                        min-width: 890px;
+                        display: block;
                     }
                 
                     .cmr-content div.cmr-error {
-                      background: #fd5a3e;
+                        background: #fd5a3e;
                     }
                 
                     .cmr-content div.cmr-warn {
-                      background: #ffbe11;
+                        background: #ffbe11;
                     }
                 
                     .cmr-content div.cmr-success {
-                      background: #97cc64;
+                        background: #97cc64;
                     }
-    
+
                     .cmr-content div.cmr-notes {
-                      background: #aaa;
+                        background: #aaa;
                     }
                 
                     .cmr-content .cmr-pre-heading {
-                      cursor: pointer;
+                        cursor: pointer;
                     }
-    
+
                     .cmr-content .cmr-sticky {
                         display: flex;
                         gap: 10px;
@@ -1094,45 +1088,45 @@ module.exports = async (config = {}) => {
                         padding-left: 1px;
                         background: inherit;
                     }
-    
+
                     .cmr-content button {
                         background: rgb(239, 239, 239);
                         border: 1px solid grey;
                         padding: 5px;
                         border-radius: 6px;
                     }
-                  </style>
-                  <script>
+                    </style>
+                    <script>
                     [...document.querySelectorAll('.cmr-pre-heading')].forEach((heading, index) => {
-                      const thisIndex = index + 1;
+                        const thisIndex = index + 1;
                 
-                      heading.addEventListener('click', () => {
+                        heading.addEventListener('click', () => {
                         heading.classList.toggle('cmr-pre-heading-active');
-    
+
                         const thisPre = document.querySelector('#cmr-pre-' + thisIndex);
                         const thisArr = document.querySelector('#cmr-arr-' + thisIndex);
                 
                         if (thisPre.style.display === 'none') {
-                          thisPre.style.removeProperty('display');
-                          thisArr.innerHTML = '⬇️';
+                            thisPre.style.removeProperty('display');
+                            thisArr.innerHTML = '⬇️';
                         } else {
-                          thisPre.style.display = 'none';
-                          thisArr.innerHTML = '➡️';
+                            thisPre.style.display = 'none';
+                            thisArr.innerHTML = '➡️';
                         }
-                      });
+                        });
                     });
-    
+
                     function getScrollHeightFromBottom(){
                         return Math.ceil(document.documentElement.scrollHeight - window.innerHeight - window.pageYOffset);
                     }
-    
+
                     document.querySelector('#cmr-open-all').addEventListener('click', () => {
                         const scrollBef=getScrollHeightFromBottom();
                         [...document.querySelectorAll('.cmr-pre-heading:not(.cmr-pre-heading-active)')].forEach((heading)=>{heading.click()});
                         window.scrollTo(0,999999999);
                         window.scrollBy(0,-scrollBef);
                     });
-    
+
                     document.querySelector('#cmr-close-all').addEventListener('click', () => {
                         const scrollBef=getScrollHeightFromBottom();
                         [...document.querySelectorAll('.cmr-pre-heading-active')].forEach((heading)=>{heading.click()});
@@ -1142,64 +1136,65 @@ module.exports = async (config = {}) => {
                     </script>
                 </body>`;
 
-        fs.writeFileSync(
-            defaultAllureReportHtml,
-            fs.readFileSync(defaultAllureReportHtml)
-                .toString('utf8')
-                .replace(/.*(googletagmanager|gtag|dataLayer|<script>|\n<\/script>).*/gm, '')// hack to remove some dodgy html that breaks allure-combine
-        )
+            fs.writeFileSync(
+                defaultAllureReportHtml,
+                fs.readFileSync(defaultAllureReportHtml)
+                    .toString('utf8')
+                    .replace(/.*(googletagmanager|gtag|dataLayer|<script>|\n<\/script>).*/gm, '')// hack to remove some dodgy html that breaks allure-combine
+            )
 
-        let combinedAllureSuccessfully = false;
+            let combinedAllureSuccessfully = false;
 
-        if (combineAllure) {
-            try {
-                runShellCommand('pip install --upgrade allure-combine && allure-combine allure-report');
+            if (combineAllure) {
+                try {
+                    runShellCommand('pip install --upgrade allure-combine && allure-combine allure-report');
 
-                fs.writeFileSync(
-                    defaultAllureReportHtmlComplete,
-                    fs.readFileSync(defaultAllureReportHtmlComplete)
-                        .toString('utf8')
-                        .replace('<body>', cmrAllureBody)
-                        .replace('</body>', cmrAllureFooter)
-                );
+                    fs.writeFileSync(
+                        defaultAllureReportHtmlComplete,
+                        fs.readFileSync(defaultAllureReportHtmlComplete)
+                            .toString('utf8')
+                            .replace('<body>', cmrAllureBody)
+                            .replace('</body>', cmrAllureFooter)
+                    );
 
-                console.log(green(`The Allure report for this run has been bundled into a single HTML file: "${allureReportHtmlComplete}"`));
+                    console.log(green(`The Allure report for this run has been bundled into a single HTML file: "${allureReportHtmlComplete}"`));
 
-                combinedAllureSuccessfully = true;
-            } catch (err) {
-                console.log(red('Error when attempting to bundle the Allure report into a single file! You might not have pip installed. See the readme for more details.'));
+                    combinedAllureSuccessfully = true;
+                } catch (err) {
+                    console.log(red('Error when attempting to bundle the Allure report into a single file! You might not have pip installed. See the readme for more details.'));
+                }
             }
-        }
 
-        // we add our custom elements into the HTML AFTER allure-combine because allure-combine will crash otherwise!
-        fs.writeFileSync(
-            defaultAllureReportHtml,
-            fs.readFileSync(defaultAllureReportHtml)
-                .toString('utf8')
-                .replace('<body>', cmrAllureBody)
-                .replace('</body>', cmrAllureFooter)
-        );
-
-        if (allureReportDir !== defaultAllureReportDir) {
-            fs.moveSync(
-                defaultAllureReportDir,
-                allureReportDir,
-                { overwrite: true },
+            // we add our custom elements into the HTML AFTER allure-combine because allure-combine will crash otherwise!
+            fs.writeFileSync(
+                defaultAllureReportHtml,
+                fs.readFileSync(defaultAllureReportHtml)
+                    .toString('utf8')
+                    .replace('<body>', cmrAllureBody)
+                    .replace('</body>', cmrAllureFooter)
             );
-        }
 
-        // host the Allure report as a localhost
-        if (hostAllure) {
-            runShellCommand(`allure open "${path.resolve(allureReportDir)}"`);
-        } else if (openAllure) {
-            if (combinedAllureSuccessfully) {
-                runShellCommand(`open "${allureReportHtmlComplete}"`);
-            } else {
-                runShellCommand(`open "${allureReportHtml}"`);
+            if (allureReportDir !== defaultAllureReportDir) {
+                fs.moveSync(
+                    defaultAllureReportDir,
+                    allureReportDir,
+                    { overwrite: true },
+                );
             }
-        }
 
-        console.log(green(`The Allure report for this run has been saved to the following directory: "${allureReportDir}"`));
+            // host the Allure report as a localhost
+            if (hostAllure) {
+                runShellCommand(`allure open "${path.resolve(allureReportDir)}"`);
+            } else if (openAllure) {
+                if (combinedAllureSuccessfully) {
+                    runShellCommand(`open "${allureReportHtmlComplete}"`);
+                } else {
+                    runShellCommand(`open "${allureReportHtml}"`);
+                }
+            }
+
+            console.log(green(`The Allure report for this run has been saved to the following directory: "${allureReportDir}"`));
+        }
     }
 
     if (fullConfig.waitForFileExist?.deleteAfterCompletion) {
