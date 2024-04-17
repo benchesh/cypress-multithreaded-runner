@@ -343,6 +343,7 @@ module.exports = async (config = {}) => {
                 threadsMeta[threadNo] = {
                     cypressConfigFilepath: phases[phaseIndex].cypressConfigFilepath,
                     cypressConfig: JSON.stringify(thread),
+                    browser: phases[phaseIndex].browser,
                     path,
                     phaseNo,
                     threadNo: threadNo,
@@ -413,7 +414,8 @@ module.exports = async (config = {}) => {
             threadsMeta[threadNo].cypressConfigFilepath || '',// $2
             threadsMeta[threadNo].cypressConfig,// $3
             threadNo,// $4
-            threadsMeta[threadNo].additionalCypressEnvArgs,// $5
+            threadsMeta[threadNo].browser || '',// $5
+            threadsMeta[threadNo].additionalCypressEnvArgs,// $6
         ]);
 
         threadsMeta[threadNo].pid = cypressProcess.pid;
