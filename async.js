@@ -881,7 +881,7 @@ module.exports = async (config = {}) => {
 
                         if (threadsMeta[thread.threadNo].retries) {
                             if (threadsMeta[thread.threadNo].retries === maxThreadRestarts) {
-                                result.push(`the thread crashed ${maxThreadRestarts} times, never recovering`);
+                                result.push(`the thread crashed ${maxThreadRestarts} time${maxThreadRestarts === 1 ? '' : 's'}, never recovering`);
                             } else {
                                 if (threadsMeta[thread.threadNo].status !== 'error') threadsMeta[thread.threadNo].status = 'warn';
 
