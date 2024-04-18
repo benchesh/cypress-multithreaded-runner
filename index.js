@@ -17,7 +17,11 @@ module.exports = (config = {}) => {
   const maxConcurrentThreadsExperiment = fullConfig.maxConcurrentThreadsExperiment;
 
   if (!maxConcurrentThreadsExperiment) {
-    runCmr(fullConfig);
+    try {
+      runCmr(fullConfig);
+    } catch (err) {
+      process.exit(1);// exits in the same manner as async mode would
+    }
     return;
   }
 

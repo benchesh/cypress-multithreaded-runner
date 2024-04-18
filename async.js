@@ -867,7 +867,7 @@ module.exports = async (config = {}) => {
                         const result = [];
 
                         if (Object.entries(obj).length) {
-                            threadsMeta[thread.threadNo].status = 'warn';
+                            if (threadsMeta[thread.threadNo].status !== 'error') threadsMeta[thread.threadNo].status = 'warn';
 
                             const counts = Object.values(obj).reduce((acc, curr) => {
                                 acc[curr] = (acc[curr] || 0) + 1;
@@ -880,9 +880,13 @@ module.exports = async (config = {}) => {
                         }
 
                         if (threadsMeta[thread.threadNo].retries) {
-                            if (threadsMeta[thread.threadNo].status !== 'error') threadsMeta[thread.threadNo].status = 'warn';
+                            if (threadsMeta[thread.threadNo].retries === maxThreadRestarts) {
+                                result.push(`the thread crashed ${maxThreadRestarts} times, never recovering`);
+                            } else {
+                                if (threadsMeta[thread.threadNo].status !== 'error') threadsMeta[thread.threadNo].status = 'warn';
 
-                            result.push(`the thread needed restarting ${threadsMeta[thread.threadNo].retries} time${threadsMeta[thread.threadNo].retries === 1 ? '' : 's'}`);
+                                result.push(`the thread needed restarting ${threadsMeta[thread.threadNo].retries} time${threadsMeta[thread.threadNo].retries === 1 ? '' : 's'}`);
+                            }
                         }
 
                         if (!result.length) {
