@@ -27,7 +27,7 @@ module.exports = (config = {}) => {
 
   const maxConcurrentThreadsArray = maxConcurrentThreadsExperiment.maxConcurrentThreadsArray;
 
-  if (!maxConcurrentThreadsExperiment.maxConcurrentThreads.length) {
+  if (!maxConcurrentThreadsExperiment.maxConcurrentThreadsArray.length) {
     process.exit(1);
   }
 
