@@ -215,12 +215,13 @@ module.exports = async (config = {}) => {
 
     const defaultAllureReportDir = path.join(reportDir, 'allure-report');
     const allureReportDir = fullConfig.allureReportDir ? path.join(fullConfig.allureReportDir) : defaultAllureReportDir;
+    const jUnitReportDir = path.join(reportDir, 'junit');
 
     const threadLogsDir = path.join(reportDir, 'cypress-logs');
 
-    const runShellCommand = (cmd) => {
+    const runShellCommand = (cmd, cwd = path.resolve(reportDir)) => {
         execSync(cmd, {
-            cwd: path.resolve(reportDir),
+            cwd,
             stdio: [null, process.stdout, process.stderr]
         });
     };
@@ -338,24 +339,25 @@ module.exports = async (config = {}) => {
         for (let i = 0; i < repeat; i++) {
             phase.forEach((thread) => {
                 const threadNo = Number(Object.values(threadsMeta).length) + 1;
-                const path = String(thread.specPattern);
+                const threadPath = String(thread.specPattern);
 
                 threadsMeta[threadNo] = {
                     cypressConfigFilepath: phases[phaseIndex].cypressConfigFilepath,
                     cypressConfig: JSON.stringify(thread),
                     browser: phases[phaseIndex].browser,
-                    path,
+                    path: threadPath,
                     phaseNo,
-                    threadNo: threadNo,
+                    threadNo,
                     status: 'success',
                     retries: 0,
                     perfResults: {},
                     logs: '',
                     printedLogs: false,
                     additionalCypressEnvArgs: phases[phaseIndex].additionalCypressEnvArgs,
+                    mochaFile: fullConfig.jUnitReport?.enabled ? path.join(jUnitReportDir, `${String(threadNo)}.xml`) : null,
                 }
 
-                initLogs[initLogs.length - 1] += `\nThread ${threadNo}: "${path}"${!savedThreadBenchmark[benchmarkId]?.order.includes(path) ? ' (not found in benchmark)' : ''}`;
+                initLogs[initLogs.length - 1] += `\nThread ${threadNo}: "${threadPath}"${!savedThreadBenchmark[benchmarkId]?.order.includes(threadPath) ? ' (not found in benchmark)' : ''}`;
             });
         }
 
@@ -415,7 +417,8 @@ module.exports = async (config = {}) => {
             threadsMeta[threadNo].cypressConfig,// $3
             threadNo,// $4
             threadsMeta[threadNo].browser || '',// $5
-            threadsMeta[threadNo].additionalCypressEnvArgs,// $6
+            threadsMeta[threadNo].mochaFile || '',// $6
+            threadsMeta[threadNo].additionalCypressEnvArgs,// $7
         ]);
 
         threadsMeta[threadNo].pid = cypressProcess.pid;
@@ -963,6 +966,52 @@ module.exports = async (config = {}) => {
             });
 
             exitCode = 1;
+        }
+    }
+
+    if (fullConfig.jUnitReport?.enabled) {
+        const { mergeFiles } = require('junit-report-merger');
+
+        const outputFile = path.join(reportDir, 'combined-junit-report.xml');
+
+        try {
+            await mergeFiles(outputFile, [path.join(jUnitReportDir, '*.xml')]);
+
+            fs.writeFileSync(
+                outputFile,
+                fs.readFileSync(outputFile)
+                    .toString('utf8')
+                    .replace(/<\/>/gm, '')// hack to remove a dodgy tag that breaks the report
+            );
+        } catch (err) {
+            console.error(red(`ERROR: JUnit report merge failed:`), err);
+        }
+
+        const browserStackObservability = fullConfig.jUnitReport?.browserStackTestObservabilityUpload;
+
+        if (browserStackObservability) {
+            const outputFileBSO = path.join(path.dirname(outputFile), path.basename(outputFile).replace('.xml', '-bso.xml'));
+
+            const endpoint = browserStackObservability.endpoint || 'https://upload-observability.browserStack.com/upload';
+
+            try {
+                fs.writeFileSync(
+                    outputFileBSO,
+                    fs.readFileSync(outputFile)
+                        .toString('utf8')
+                        .replace(/timestamp="(.*?)"( *|)/gmi, '')// BrowserStack observability doesn't like timestamps!
+                        .replace(/name="([^"]+)"/g, (_match, nameValue) => {
+                            const sanitisedName = nameValue.replace(/[^a-zA-Z0-9^ \[\]:-_]/g, "-");
+                            return `name="${sanitisedName}"`;
+                        })
+                );
+
+                runShellCommand(`curl -u "${browserStackObservability.username}:${browserStackObservability.accessKey}" -vvv -X POST -F "data=@${path.basename(outputFileBSO)}" ${Object.keys(browserStackObservability.parameters || {}).map(key => `-F "${key}=${browserStackObservability.parameters[key]}"`).join(' ')} ${endpoint}`, path.dirname(outputFileBSO))
+
+                console.log(`\n\nUploaded JUnit report to ${endpoint}\n`);
+            } catch (err) {
+                console.error(red(`ERROR: JUnit report failed to upload to ${endpoint}:`), err);
+            }
         }
     }
 

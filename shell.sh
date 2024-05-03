@@ -11,8 +11,12 @@ else
     browser="--browser $5"
 fi
 
-additionalCypressEnvArgs="$6"
+additionalCypressEnvArgs="$7"
 
-cypress run $browser --config-file "$cypressConfigFilepath" --e2e --config="$thread" --env allure=true,allureResults="$allureResultsPath""$additionalCypressEnvArgs"
+if [[ "$6" == "" ]]; then
+    cypress run $browser --config-file "$cypressConfigFilepath" --e2e --config="$thread" --env allure=true,allureResults="$allureResultsPath""$additionalCypressEnvArgs"
+else
+    cypress run $browser --config-file "$cypressConfigFilepath" --reporter junit --reporter-options="{\"mochaFile\":\"$6\"}" --e2e --config="$thread" --env allure=true,allureResults="$allureResultsPath""$additionalCypressEnvArgs"
+fi
 
 echo Thread \#"$threadNo" has completed.
