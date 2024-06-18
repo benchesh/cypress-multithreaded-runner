@@ -50,13 +50,21 @@ const getFiles = (srcpath) => (
     .filter((filepath) => !fs.statSync(filepath).isDirectory());
 
 const arrToNaturalStr = (arr) => {
-    const str = arr.join(', ').replace(/,\s([^,]+)$/, ' and $1');
+    arr = arr.filter(a => a);
 
-    if (str) {
-        return str.charAt(0).toUpperCase() + str.slice(1);
+    if (!arr.length) {
+        return '';
     }
 
-    return str;
+    let str;
+
+    if (arr.length === 1) {
+        str = arr[0];
+    } else {
+        str = [arr.slice(0, -1).join(', ')].concat([arr[arr.length - 1]]).join(' and ');
+    }
+
+    return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
 const strArrayTransformer = (data, lowercase = true) => {
