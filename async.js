@@ -431,12 +431,16 @@ module.exports = async (config = {}) => {
 
         threadsMeta[threadNo].pid = cypressProcess.pid;
 
+        threadsMeta[threadNo].killFunc = () => {
+            if (threadsMeta[threadNo].pid) kill(cypressProcess.pid)
+        }
+
         if (!threadsMeta[threadNo].retries) noOfThreadsInUse++;
 
         let restartTests = false;
 
         if (phaseLock && phaseLock < threadsMeta[threadNo].phaseNo) {//hack this is daft but it works. Prevent thread from running if a thread from a previous phase has already failed
-            kill(cypressProcess.pid);
+            threadsMeta[threadNo].killFunc();
             return;
         }
 
@@ -468,7 +472,7 @@ module.exports = async (config = {}) => {
 
                 restartTests = true;
 
-                kill(threadsMeta[threadNo].pid);
+            threadsMeta[threadNo].killFunc();
             }, threadInactivityTimeout * 1000);
         };
 
@@ -486,7 +490,7 @@ module.exports = async (config = {}) => {
 
                 restartTests = false;
 
-                kill(threadsMeta[threadNo].pid);
+                threadsMeta[threadNo].killFunc();
             }, threadTimeLimit * 1000);
         };
 
@@ -520,12 +524,12 @@ module.exports = async (config = {}) => {
             ) {
                 restartTests = true;
 
-                kill(cypressProcess.pid);
+                threadsMeta[threadNo].killFunc();
             } else if (log.includes('no spec files were found')) {
                 threadsMeta[threadNo].status = 'error';
                 threadsMeta[threadNo].errorType = 'no-spec-files';
 
-                kill(cypressProcess.pid);
+                threadsMeta[threadNo].killFunc();
             } else if (!threadStarted && log.includes('(Run Starting)')) {
                 threadStarted = true;
                 threadDelayTout.clearTimeout();
@@ -567,6 +571,7 @@ module.exports = async (config = {}) => {
         logCheck(`Start of thread #${threadNo}:\n`);
 
         const threadCompleteFunc = () => {
+            clearTimeout(threadsMeta[threadNo].threadTimeLimitTimer);
             printAllLogs();
 
             if (
@@ -589,7 +594,7 @@ module.exports = async (config = {}) => {
                             threadsMeta[thread.threadNo].perfResults.startTime = undefined;
                         }
 
-                        if (thread.pid) kill(thread.pid);
+                        threadsMeta[thread.threadNo].killFunc();
                     });
                 }
             }
@@ -609,7 +614,6 @@ module.exports = async (config = {}) => {
         return new Promise((resolve) => {
             cypressProcess.on('close', async () => {
                 clearTimeout(threadsMeta[threadNo].threadInactivityTimer);
-                clearTimeout(threadsMeta[threadNo].threadTimeLimitTimer);
 
                 if (restartTests) {
                     restartAttempts++;
