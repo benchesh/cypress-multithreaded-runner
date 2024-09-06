@@ -472,7 +472,7 @@ module.exports = async (config = {}) => {
 
                 restartTests = true;
 
-            threadsMeta[threadNo].killFunc();
+                threadsMeta[threadNo].killFunc();
             }, threadInactivityTimeout * 1000);
         };
 
@@ -1066,26 +1066,26 @@ module.exports = async (config = {}) => {
 
             const cmrAllureBody = `<body>
                 <div class="cmr-content cmr-header">
-                    <div class="cmr-${status} headline"><h2 id="cmr-collapse">⬇️</h2><h2>Cypress Multithreaded Runner${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
+                    <div class="cmr-${status} cmr-headline"><h2 id="cmr-collapse">⬇️</h2><h2>Cypress Multithreaded Runner${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
                     ${(criticalErrorThreads.length || timeoutErrorThreads.length) ? `
-                    <div class="cmr-error">
+                    <div class="cmr-error cmr-summary">
                         Be advised! This Allure report doesn't tell the full story. ${phaseLock ? `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>` : ''}${criticalErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete!` : ''}${timeoutErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</strong> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.` : ''} Therefore, one or more spec files may have not been fully tested! Scroll down to read the full logs from the separate threads.
                     </div>` : ''}
                     ${minorErrorThreads.length ? `
-                    <div class="cmr-error">
+                    <div class="cmr-error cmr-summary">
                         ${minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${(!criticalErrorThreads.length && !timeoutErrorThreads.length) ? '<br>Scroll down to read the full logs from the separate threads.' : ''}
                     </div>` : ''}
                     ${warnThreads.length ? `
-                    <div class="cmr-warn">
+                    <div class="cmr-warn cmr-summary">
                         ${warnThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${status === 'warn' ? '<br>Scroll down to read the full logs from the separate threads.' : ''}
                     </div>` : ''}
                     ${status === 'success' ? `
-                    <div class="cmr-success">
+                    <div class="cmr-success cmr-summary">
                         Everything seems completely fine! No tests needed retrying. Scroll down to read the full logs from the separate threads.
                     </div>
                     `: ''}
                     ${reportHeadNotes.length ? `
-                    <div class="cmr-notes">
+                    <div class="cmr-notes cmr-summary">
                         ${reportHeadNotes.map(note => `NOTE: ${note}`).join('<br>')}
                     </div>` : ''}
                 </div>`;
@@ -1118,6 +1118,14 @@ module.exports = async (config = {}) => {
                 
                     .cmr-content pre {
                         overflow-wrap: break-word;
+                    }
+
+                    #cmr-collapse {
+                        padding-right: 10px;
+                    }
+
+                    .cmr-headline h2 {
+                        cursor: pointer;
                     }
                 
                     .cmr-content div {
@@ -1207,13 +1215,7 @@ module.exports = async (config = {}) => {
 
                     const cmrHeadline = document.querySelector('div.cmr-content > :first-child');
                     cmrHeadline.addEventListener('click', (event) => {
-                        document.querySelectorAll('.cmr-header .cmr-error').forEach(element => {
-                            if (element.classList.contains('headline')) {
-                                return;
-                            }
-                            element.classList.toggle('cmr-hidden');
-                        });
-                        document.querySelectorAll('.cmr-header .cmr-warn, .cmr-header .cmr-notes').forEach(element => {
+                        document.querySelectorAll('.cmr-summary').forEach(element => {
                             element.classList.toggle('cmr-hidden');
                         });
 
