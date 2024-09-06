@@ -1271,7 +1271,7 @@ module.exports = async (config = {}) => {
 
             // host the Allure report as a localhost
             if (hostAllure) {
-                runShellCommand(`allure open "${path.resolve(allureReportDir)}"`);
+                runShellCommand('allure open', path.resolve(reportDir));
             } else if (openAllure) {
                 if (combinedAllureSuccessfully) {
                     runShellCommand(`open "${allureReportHtmlComplete}"`);
