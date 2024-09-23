@@ -363,6 +363,7 @@ module.exports = async (config = {}) => {
                     printedLogs: false,
                     additionalCypressEnvArgs: phases[phaseIndex].additionalCypressEnvArgs,
                     mochaFile: fullConfig.jUnitReport?.enabled ? path.join(jUnitReportDir, `${String(threadNo)}.xml`) : null,
+                    killFunc: () => { threadsMeta[threadNo].skip = true }
                 }
 
                 initLogs[initLogs.length - 1] += `\nThread ${threadNo}: "${threadPath}"${!savedThreadBenchmark[benchmarkId]?.order.includes(threadPath) ? ' (not found in benchmark)' : ''}`;
@@ -432,7 +433,7 @@ module.exports = async (config = {}) => {
         threadsMeta[threadNo].pid = cypressProcess.pid;
 
         threadsMeta[threadNo].killFunc = () => {
-            if (threadsMeta[threadNo].pid) kill(cypressProcess.pid)
+            if (cypressProcess.pid) kill(cypressProcess.pid)
         }
 
         if (!threadsMeta[threadNo].retries) noOfThreadsInUse++;
@@ -713,6 +714,8 @@ module.exports = async (config = {}) => {
             threadsArr.push(spawnThread(2));
 
             for (const [_, thread] of Object.values(threadsMeta).slice(2).entries()) {
+                if (thread.skip) continue;
+
                 await delay(threadDelay);
 
                 if (!phaseLock || thread.phaseNo <= phaseLock) {//hack this is daft but it works
