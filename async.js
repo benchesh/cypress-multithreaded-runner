@@ -371,14 +371,14 @@ module.exports = async (config = {}) => {
         }
 
         if (phases[phaseIndex].onlyRunSpecFilesIncludingAnyText) {
-            const note = `NOTE: For phase #${phaseNo}, onlyRunSpecFilesIncludingAnyText is set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAnyText.join('", "')}"]. Therefore, only spec files that contain any strings from this array will be processed.`;
+            const note = `For phase #${phaseNo}, onlyRunSpecFilesIncludingAnyText is set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAnyText.join('", "')}"]. Therefore, only spec files that contain any strings from this array will be processed.`;
 
             initLogs.push(note);
             reportHeadNotes.push(note);
         }
 
         if (phases[phaseIndex].onlyRunSpecFilesIncludingAllText) {
-            const note = `NOTE: For phase #${phaseNo}, onlyRunSpecFilesIncludingAllText is set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAllText.join('", "')}"]. Therefore, only spec files that contain all strings from this array will be processed.`;
+            const note = `For phase #${phaseNo}, onlyRunSpecFilesIncludingAllText is set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAllText.join('", "')}"]. Therefore, only spec files that contain all strings from this array will be processed.`;
 
             initLogs.push(note);
             reportHeadNotes.push(note);
