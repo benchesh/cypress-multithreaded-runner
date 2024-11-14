@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@mmisty/cypress-allure-adapter": "^3.2.2",
+    "allure-combined": "^0.0.1",
     "allure-commandline": "^2.31.0",
     "fs-extra": "^11.2.0",
     "junit-report-merger": "^7.0.0",

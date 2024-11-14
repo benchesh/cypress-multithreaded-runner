@@ -14,6 +14,8 @@ const path = require('path');
 
 const noConsoleColours = String(process.env.NO_COLOR) === '1';
 
+const defaultLog = console.log;
+
 /**
  * Recursively create a path if it doesn't exist
  * 
@@ -218,7 +220,7 @@ module.exports = async (config = {}) => {
     const benchmarkId = btoa(JSON.stringify(benchmarkObj));
 
     const openAllure = fullConfig.openAllure || false;
-    const combineAllure = fullConfig.combineAllure || false;
+    const combineAllure = fullConfig.combineAllure || true;
     const hostAllure = fullConfig.hostAllure || false;
 
     const defaultAllureReportDir = path.join(reportDir, 'allure-report');
@@ -1239,7 +1241,16 @@ module.exports = async (config = {}) => {
 
             if (combineAllure) {
                 try {
-                    runShellCommand('pip install --upgrade allure-combine && allure-combine allure-report');
+                    if (combineAllure === 'pip') {
+                        runShellCommand('pip install --upgrade allure-combine && allure-combine allure-report');
+                    } else {
+                        const { combineAllure: combineAllureModule } = require('allure-combined');
+
+                        // temporarily disable logs
+                        console.log = function () { };
+                        combineAllureModule(defaultAllureReportDir)
+                        console.log = defaultLog;
+                    }
 
                     fs.writeFileSync(
                         defaultAllureReportHtmlComplete,
@@ -1253,7 +1264,7 @@ module.exports = async (config = {}) => {
 
                     combinedAllureSuccessfully = true;
                 } catch (err) {
-                    console.log(red('Error when attempting to bundle the Allure report into a single file! You might not have pip installed. See the readme for more details.'));
+                    console.log(red(`Error when attempting to bundle the Allure report into a single file!${combineAllure === 'pip' ? 'You might not have pip installed. See the readme for more details.' : ''}`));
                 }
             }
 
