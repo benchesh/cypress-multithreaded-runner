@@ -6,7 +6,7 @@ When used out of the box, Cypress will only run your spec files in a single thre
 
 NOTE: Currently, generating the Allure report is needed in order for this module to function correctly, but this may change later.
 
-## Dependencies
+## Prerequisites
 
 - [node 18 or above](https://nodejs.org/en/download)
 - [Java](https://www.java.com/en/download/)
