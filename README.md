@@ -9,6 +9,7 @@ NOTE: Currently, generating the Allure report is needed in order for this module
 ## Dependencies
 
 - [node 18 or above](https://nodejs.org/en/download)
+- [Java](https://www.java.com/en/download/)
 - A [Cypress](https://www.npmjs.com/package/cypress) project (tested on versions `12.10` and `13.7`)
 - [pip](https://pypi.org/project/pip/) (optional: only needed if you wish to combine the Allure report into a single file)
 - [@cypress/grep](https://www.npmjs.com/package/@cypress/grep) (optional: only needed if you want to use Cypress grep features)
