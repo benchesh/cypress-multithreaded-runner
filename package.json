@@ -22,6 +22,7 @@
     "fs-extra": "^11.2.0",
     "junit-report-merger": "^7.0.0",
     "kill-sync": "^1.0.3",
+    "node-notifier": "^10.0.1",
     "yargs": "^17.7.2"
   }
 }

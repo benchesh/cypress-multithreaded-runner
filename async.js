@@ -16,6 +16,8 @@ const noConsoleColours = String(process.env.NO_COLOR) === '1';
 
 const defaultLog = console.log;
 
+const notifier = require('node-notifier');
+
 /**
  * Recursively create a path if it doesn't exist
  * 
@@ -149,6 +151,7 @@ module.exports = async (config = {}) => {
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
     const benchmarkDescription = fullConfig.benchmarkDescription ?? null;
     const specFiles = fullConfig.specFiles ?? null;
+    const notifications = fullConfig.notify ?? true;
 
     const generateAllure = fullConfig.generateAllure ?? true;
 
@@ -219,9 +222,9 @@ module.exports = async (config = {}) => {
 
     const benchmarkId = btoa(JSON.stringify(benchmarkObj));
 
-    const openAllure = fullConfig.openAllure || false;
-    const combineAllure = fullConfig.combineAllure || true;
-    const hostAllure = fullConfig.hostAllure || false;
+    const openAllure = fullConfig.openAllure ?? false;
+    const combineAllure = fullConfig.combineAllure ?? true;
+    const hostAllure = fullConfig.hostAllure ?? false;
 
     const defaultAllureReportDir = path.join(reportDir, 'allure-report');
     const allureReportDir = fullConfig.allureReportDir ? path.join(fullConfig.allureReportDir) : defaultAllureReportDir;
@@ -239,6 +242,18 @@ module.exports = async (config = {}) => {
     let thread2ExtraLog = '';
 
     let exitCode = 0;
+
+    const notify = (message) => {
+        if (notifications) {
+            notifier.notify(
+                {
+                    title: 'Cypress Multithreaded Runner',
+                    message,
+                    sound: true,
+                },
+            );
+        }
+    }
 
     if (fullConfig.maxConcurrentThreadsExperiment) {
         console.warn(orange('WARNING: maxConcurrentThreadsExperiment will not work when run through the async mode'));
@@ -286,6 +301,7 @@ module.exports = async (config = {}) => {
 
     if (!cypressConfigPhasesUnsorted.length) {
         console.error(red('CRITICAL ERROR: No test phases were found!'));
+        notify('No test phases were found');
         process.exit(1);
     }
 
@@ -407,6 +423,7 @@ module.exports = async (config = {}) => {
 
     if (!Object.values(threadsMeta).length) {
         console.error(red('CRITICAL ERROR: No spec files were found!'));
+        notify('No spec files were found');
         process.exit(1);
     }
 
@@ -1285,6 +1302,8 @@ module.exports = async (config = {}) => {
                 );
             }
 
+            console.log(green(`The Allure report for this run has been saved to the following directory: "${allureReportDir}"`));
+
             // host the Allure report as a localhost
             if (hostAllure) {
                 runShellCommand('allure open', path.resolve(reportDir));
@@ -1294,9 +1313,9 @@ module.exports = async (config = {}) => {
                 } else {
                     runShellCommand(`open "${allureReportHtml}"`);
                 }
+            } else {
+                console.log('Passing through the arg --open will open the Allure report as soon as the tests have finished running')
             }
-
-            console.log(green(`The Allure report for this run has been saved to the following directory: "${allureReportDir}"`));
         }
     }
 
@@ -1305,6 +1324,8 @@ module.exports = async (config = {}) => {
             fs.unlinkSync(waitForFileExistFilepath);
         }
     }
+
+    notify(exitCode === 0 ? 'Tests completed (all passed)' : 'Tests completed (with failures)');
 
     if (endProcessIfTestsFail && exitCode) {
         process.exit(exitCode);
