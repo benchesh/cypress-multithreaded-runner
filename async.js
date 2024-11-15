@@ -12,8 +12,6 @@ const kill = (pid) => killSync(pid, 'SIGINT', true);
 
 const path = require('path');
 
-const noConsoleColours = String(process.env.NO_COLOR) === '1';
-
 const defaultLog = console.log;
 
 const notifier = require('node-notifier');
@@ -24,11 +22,6 @@ const notifier = require('node-notifier');
  * @param {string} str the path to check and create
  */
 const mkdirSyncIfMissing = (s) => !fs.existsSync(s) && fs.mkdirSync(s, { recursive: true });
-
-//for console logs
-const green = (s) => noConsoleColours ? s : `\x1b[32m${s}\x1b[0m`;
-const orange = (s) => noConsoleColours ? s : `\x1b[33m${s}\x1b[0m`;
-const red = (s) => noConsoleColours ? s : `\x1b[31m${s}\x1b[0m`;
 
 /**
  * Write to a file. Will create the file & destination folder if they don't exist
@@ -132,7 +125,7 @@ module.exports = async (config = {}) => {
 
     const fullConfig = getFullConfig(config);
 
-    const reportDir = fullConfig.reportDir ? path.join(fullConfig.reportDir) : null;
+    const reportDir = fullConfig.reportDir;
     const maxThreadRestarts = fullConfig.maxThreadRestarts ?? 5;
     const waitForFileExistTimeout = fullConfig.waitForFileExist?.timeout ?? 60;
     const waitForFileMinimumSize = fullConfig.waitForFileExist?.minSize ?? 2;
@@ -144,7 +137,7 @@ module.exports = async (config = {}) => {
 
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
     const logMode = fullConfig.logMode || 1;
-    const allureReportHeading = fullConfig.allureReportHeading ? `: ${fullConfig.allureReportHeading}` : '';
+    const allureReportHeading = fullConfig.allureReportHeading;
     const threadMode = fullConfig.threadMode || 1;
     const orderThreadsByBenchmark = fullConfig.orderThreadsByBenchmark ?? true;
     const saveThreadBenchmark = fullConfig.saveThreadBenchmark ?? true;
@@ -153,7 +146,7 @@ module.exports = async (config = {}) => {
     const specFiles = fullConfig.specFiles ?? null;
     const notifications = fullConfig.notify ?? true;
 
-    const generateAllure = fullConfig.generateAllure ?? true;
+    const generateAllure = fullConfig.generateAllure;
 
     const endProcessIfTestsFail = fullConfig.endProcessIfTestsFail ?? true;
 
@@ -222,12 +215,12 @@ module.exports = async (config = {}) => {
 
     const benchmarkId = btoa(JSON.stringify(benchmarkObj));
 
-    const openAllure = fullConfig.openAllure ?? false;
+    const openAllure = fullConfig.openAllure;
     const combineAllure = fullConfig.combineAllure ?? true;
     const hostAllure = fullConfig.hostAllure ?? false;
 
-    const defaultAllureReportDir = path.join(reportDir, 'allure-report');
-    const allureReportDir = fullConfig.allureReportDir ? path.join(fullConfig.allureReportDir) : defaultAllureReportDir;
+    const defaultAllureReportDir = fullConfig.defaultAllureReportDir;
+    const allureReportDir = fullConfig.allureReportDir;
     const jUnitReportDir = path.join(reportDir, 'junit');
 
     const threadLogsDir = path.join(reportDir, 'cypress-logs');
@@ -244,7 +237,7 @@ module.exports = async (config = {}) => {
     let exitCode = 0;
 
     const notify = (message) => {
-        if (notifications) {
+        if (notifications && !fullConfig.maxConcurrentThreadsExperimentInProg) {
             notifier.notify(
                 {
                     title: 'Cypress Multithreaded Runner',
@@ -255,7 +248,7 @@ module.exports = async (config = {}) => {
         }
     }
 
-    if (fullConfig.maxConcurrentThreadsExperiment) {
+    if (fullConfig.maxConcurrentThreadsExperiment && !fullConfig.maxConcurrentThreadsExperimentInProg) {
         console.warn(orange('WARNING: maxConcurrentThreadsExperiment will not work when run through the async mode'));
     }
 
@@ -628,7 +621,7 @@ module.exports = async (config = {}) => {
             threadDelayTout.clearTimeout();// todo this doesn't consider whether another thread is currently restarting and so may end a timeout early, but it doesn't really matter...
             threadsMeta[threadNo].complete = true;
             threadsMeta[threadNo].pid = false;
-            threadsMeta[threadNo].perfResults.secs = timeDifference(performance.now(), threadsMeta[threadNo].perfResults.startTime);
+            threadsMeta[threadNo].perfResults.secs = calcTimeDifference(performance.now(), threadsMeta[threadNo].perfResults.startTime);
         }
 
         return new Promise((resolve) => {
@@ -756,9 +749,11 @@ module.exports = async (config = {}) => {
         })
     }
 
-    console.log(`All Cypress testing threads have ended after ${secondsToNaturalString(timeDifference(performance.now(), startTime))}.`);
+    console.log(`All Cypress testing threads have ended after ${secondsToNaturalString(calcTimeDifference(performance.now(), startTime))}.`);
 
     let reportText = '';
+
+    const threadSummary = { crashes: {}, crashSummary: [], fails: {}, failSummary: [] };
 
     // bulk of multithread report logic
     {
@@ -913,10 +908,22 @@ module.exports = async (config = {}) => {
 
                             Object.keys(counts).sort((a, b) => b - a).forEach((num) => {
                                 result.push(`${counts[num]} test${counts[num] > 1 ? 's' : ''} failed ${num} time${num > 1 ? 's' : ''}`);
+
+                                if (threadSummary.fails[num]) {
+                                    threadSummary.fails[num] += counts[num];
+                                } else {
+                                    threadSummary.fails[num] = counts[num];
+                                }
                             });
                         }
 
                         if (threadsMeta[thread.threadNo].retries) {
+                            if (threadSummary.crashes[threadsMeta[thread.threadNo].retries]) {
+                                threadSummary.crashes[threadsMeta[thread.threadNo].retries]++;
+                            } else {
+                                threadSummary.crashes[threadsMeta[thread.threadNo].retries] = 1;
+                            }
+
                             if (threadsMeta[thread.threadNo].retries === maxThreadRestarts) {
                                 result.push(`the thread crashed ${maxThreadRestarts} time${maxThreadRestarts === 1 ? '' : 's'}, never recovering`);
                             } else {
@@ -944,6 +951,30 @@ module.exports = async (config = {}) => {
         };
 
         reportText = `See below to compare how each thread performed.\n\n${generateThreadBars(longestThread.secs)}The percentages given above represent how much time individual threads took to complete relative to thread #${longestThread.threadNo}, which was the longest at ${longestThread.naturalString}. Any thread that takes significantly longer than others will be a bottleneck, so the closer the percentages are to one another, the better. A wide range in percentages indicates that the threads could be balanced more efficiently. Be alert as to whether any thread/test needed retrying, because that will skew the results for the affected threads.`;
+
+        threadSummary.summary = (() => {
+            Object.entries(threadSummary.crashes).reverse().forEach((prop) => {
+                threadSummary.crashSummary.push(`${prop[1]} thread${prop[1] === 1 ? '' : 's'} crashed ${prop[0]} time${Number(prop[0]) === 1 ? '' : 's'}`);
+            });
+
+            threadSummary.crashSummary = arrToNaturalStr(threadSummary.crashSummary);
+
+            Object.entries(threadSummary.fails).reverse().forEach((prop) => {
+                threadSummary.failSummary.push(`${prop[1]} test${prop[1] === 1 ? '' : 's'} failed ${prop[0]} time${Number(prop[0]) === 1 ? '' : 's'}`);
+            });
+
+            threadSummary.failSummary = arrToNaturalStr(threadSummary.failSummary);
+
+            return [threadSummary.crashSummary, threadSummary.failSummary].filter(s => s).join('. ')
+        })();
+
+        if (threadSummary.summary) {
+            threadSummary.summary += '.';
+
+            console.log(`\n\n${threadSummary.summary}`);
+
+            fs.writeFileSync(path.resolve(reportDir, 'thread-performance-summary.txt'), threadSummary.summary);
+        }
 
         console.log(`\n\n${reportText}\n\n`);
 
@@ -1088,7 +1119,7 @@ module.exports = async (config = {}) => {
 
             const cmrAllureBody = `<body>
                 <div class="cmr-content cmr-header">
-                    <div class="cmr-${status} cmr-headline"><h2 id="cmr-collapse">⬇️</h2><h2>Cypress Multithreaded Runner${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
+                    <div class="cmr-${status} cmr-headline"><h2 id="cmr-collapse">⬇️</h2><h2>${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
                     ${(criticalErrorThreads.length || timeoutErrorThreads.length) ? `
                     <div class="cmr-error cmr-summary">
                         Be advised! This Allure report doesn't tell the full story. ${phaseLock ? `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>` : ''}${criticalErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete!` : ''}${timeoutErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</strong> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.` : ''} Therefore, one or more spec files may have not been fully tested! Scroll down to read the full logs from the separate threads.
@@ -1115,7 +1146,7 @@ module.exports = async (config = {}) => {
             const cmrAllureFooter = `<div class="cmr-content cmr-footer">${allLogs
                 .replace(/Couldn't find tsconfig.json. tsconfig-paths will be skipped\n/g, '')// this warning is noisy, remove it
                 .replace(/tput: No value for \$TERM and no -T specified\n/g, '')// this warning is noisy, remove it
-                }<div class="cmr-report"><button id="cmr-open-all">Open all logs above</button><button id="cmr-close-all">Close all logs above</button><br><br><h2 class="cmr-sticky">Thread Performance Summary</h2><pre>${reportText}</pre></div></div>
+                }<div class="cmr-report"><button id="cmr-open-all">Open all logs above</button><button id="cmr-close-all">Close all logs above</button><br><br><h2 class="cmr-sticky">Thread Performance Summary</h2><pre>${[threadSummary.summary, reportText].filter(s => s).join('\n\n')}</pre></div></div>
                 
                     <style>
                     .cmr-content #cmr-close-all {
@@ -1305,16 +1336,18 @@ module.exports = async (config = {}) => {
             console.log(green(`The Allure report for this run has been saved to the following directory: "${allureReportDir}"`));
 
             // host the Allure report as a localhost
-            if (hostAllure) {
-                runShellCommand('allure open', path.resolve(reportDir));
-            } else if (openAllure) {
-                if (combinedAllureSuccessfully) {
-                    runShellCommand(`open "${allureReportHtmlComplete}"`);
+            if (!fullConfig.maxConcurrentThreadsExperimentInProg) {
+                if (hostAllure) {
+                    runShellCommand('allure open', path.resolve(reportDir));
+                } else if (openAllure) {
+                    if (combinedAllureSuccessfully) {
+                        runShellCommand(`open "${allureReportHtmlComplete}"`);
+                    } else {
+                        runShellCommand(`open "${allureReportHtml}"`);
+                    }
                 } else {
-                    runShellCommand(`open "${allureReportHtml}"`);
+                    console.log('Passing through the arg --open will open the Allure report as soon as the tests have finished running')
                 }
-            } else {
-                console.log('Passing through the arg --open will open the Allure report as soon as the tests have finished running')
             }
         }
     }
