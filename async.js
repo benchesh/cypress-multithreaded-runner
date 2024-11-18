@@ -16,6 +16,8 @@ const defaultLog = console.log;
 
 const notifier = require('node-notifier');
 
+const events = require('events');
+
 /**
  * Recursively create a path if it doesn't exist
  * 
@@ -443,9 +445,18 @@ module.exports = async (config = {}) => {
         ]);
 
         threadsMeta[threadNo].pid = cypressProcess.pid;
+        threadsMeta[threadNo].emitter = new events.EventEmitter();
+
+        threadsMeta[threadNo].fallbackCloseFunc = () => {
+            threadsMeta[threadNo].fallbackCloseTimer = setTimeout(() => {
+                console.warn(`Fallback exit function on thread #${threadNo}`);
+                threadsMeta[threadNo].emitter.emit('exit');
+            }, 5000);
+        }
 
         threadsMeta[threadNo].killFunc = () => {
-            if (cypressProcess.pid) kill(cypressProcess.pid)
+            threadsMeta[threadNo].fallbackCloseFunc();
+            if (cypressProcess.pid) kill(cypressProcess.pid);
         }
 
         if (!threadsMeta[threadNo].retries) noOfThreadsInUse++;
@@ -511,6 +522,11 @@ module.exports = async (config = {}) => {
 
         // detect known internal errors and restart the tests when they occur!
         const logCheck = async (log) => {
+            if (log.includes('<FALLBACK_SHELL_EXIT>')) {
+                threadsMeta[threadNo].fallbackCloseFunc();
+                return;
+            }
+
             threadsMeta[threadNo].logs += log;
 
             if (logMode > 2) {
@@ -625,8 +641,13 @@ module.exports = async (config = {}) => {
         }
 
         return new Promise((resolve) => {
-            cypressProcess.on('close', async () => {
+            cypressProcess.on('close', () => {
+                threadsMeta[threadNo].emitter.emit('exit');
+            });
+
+            threadsMeta[threadNo].emitter.on('exit', async () => {
                 clearTimeout(threadsMeta[threadNo].threadInactivityTimer);
+                clearTimeout(threadsMeta[threadNo].fallbackCloseTimer);
 
                 if (restartTests) {
                     restartAttempts++;
