@@ -124,8 +124,8 @@ module.exports = (config = {}) => {
    <meta charset="utf-8">
    <title>Cypress Multithreaded Runner - Max concurrent threads experiment results</title>
 </head>
-<body style="margin: 8px">
-  <pre>${experimentResultsStr}`;
+<body style="margin:0;">
+  <pre style="padding:15px;margin:0;">${experimentResultsStr}`;
 
   maxConcurrentThreadsArray.forEach((maxConcurrentThreads, index) => {
     const heading = `===========================\n${maxConcurrentThreads} max concurrent thread(s):\n===========================\n`;
@@ -146,7 +146,7 @@ module.exports = (config = {}) => {
           return path.join(experiment.cmreAllureDirRel, 'index.html')
         }
 
-        return `${html ? `<a href="./${getAllureUrl()}">` : ''}Experiment #${expIndex + 1}${html ? `</a>` : ''}: ${generatePercentageBar(percentageOfTotal, experiment.timeTaken)}\n${experiment.summary ? experiment.summary : 'No tests failed!'}\nStarted: ${experiment.timeStarted}\nFinished: ${experiment.timeFinished}\n\n`
+        return `${html ? `<a href="./${getAllureUrl()}">` : ''}Experiment #${expIndex + 1}${html ? `</a>` : ''}: ${generatePercentageBar(percentageOfTotal, experiment.timeTaken)}\n${experiment.summary}\nStarted: ${experiment.timeStarted}\nFinished: ${experiment.timeFinished}\n\n`
       }
 
       experimentResultsStr += strAppend();

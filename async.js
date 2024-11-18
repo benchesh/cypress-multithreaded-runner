@@ -872,18 +872,36 @@ module.exports = async (config = {}) => {
                         threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${thread.threadNo}`;
                         str += `${err}\n\n`;
                         exitCode = 1;
+
+                        if (threadSummary.nospecs) {
+                            threadSummary.nospecs++;
+                        } else {
+                            threadSummary.nospecs = 1;
+                        }
                     } else if (threadsMeta[thread.threadNo].errorType === 'critical') {
                         const err = 'CRITICAL ERROR: Thread did not complete!';
                         threadsMeta[thread.threadNo].status = 'error';
                         threadsMeta[thread.threadNo].heading.push(err);
                         str += `${err}\n\n`;
                         exitCode = 1;
+
+                        if (threadSummary.criticals) {
+                            threadSummary.criticals++;
+                        } else {
+                            threadSummary.criticals = 1;
+                        }
                     } else if (threadsMeta[thread.threadNo].errorType === 'timeout') {
                         const err = `CRITICAL ERROR: Thread did not complete as it went over the time limit of ${secondsToNaturalString(threadTimeLimit)}`;
                         threadsMeta[thread.threadNo].status = 'error';
                         threadsMeta[thread.threadNo].heading.push(err);
                         str += `${err}\n\n`;
                         exitCode = 1;
+
+                        if (threadSummary.timeouts) {
+                            threadSummary.timeouts++;
+                        } else {
+                            threadSummary.timeouts = 1;
+                        }
                     }
 
                     const percentageOfTotal = (
@@ -953,28 +971,39 @@ module.exports = async (config = {}) => {
         reportText = `See below to compare how each thread performed.\n\n${generateThreadBars(longestThread.secs)}The percentages given above represent how much time individual threads took to complete relative to thread #${longestThread.threadNo}, which was the longest at ${longestThread.naturalString}. Any thread that takes significantly longer than others will be a bottleneck, so the closer the percentages are to one another, the better. A wide range in percentages indicates that the threads could be balanced more efficiently. Be alert as to whether any thread/test needed retrying, because that will skew the results for the affected threads.`;
 
         threadSummary.summary = (() => {
+            threadSummary.criticalsArr = [];
+
+            if (threadSummary.criticals) {
+                threadSummary.criticalsArr.push(`${threadSummary.criticals} thread${threadSummary.criticals === 1 ? '' : 's'} didn\'t complete due to critical errors`);
+            }
+
+            if (threadSummary.timeouts) {
+                threadSummary.criticalsArr.push(`${threadSummary.timeouts} thread${threadSummary.timeouts === 1 ? '' : 's'} didn\'t complete due to timing out`);
+            }
+
             Object.entries(threadSummary.crashes).reverse().forEach((prop) => {
                 threadSummary.crashSummary.push(`${prop[1]} thread${prop[1] === 1 ? '' : 's'} crashed ${prop[0]} time${Number(prop[0]) === 1 ? '' : 's'}`);
             });
-
-            threadSummary.crashSummary = arrToNaturalStr(threadSummary.crashSummary);
 
             Object.entries(threadSummary.fails).reverse().forEach((prop) => {
                 threadSummary.failSummary.push(`${prop[1]} test${prop[1] === 1 ? '' : 's'} failed ${prop[0]} time${Number(prop[0]) === 1 ? '' : 's'}`);
             });
 
-            threadSummary.failSummary = arrToNaturalStr(threadSummary.failSummary);
+            const summary = [
+                threadSummary.nospecs ? `${threadSummary.nospecs} threads didn't contain any spec files` : null,
+                arrToNaturalStr(threadSummary.criticalsArr),
+                arrToNaturalStr(threadSummary.crashSummary),
+                arrToNaturalStr(threadSummary.failSummary)
+            ].filter(s => s).join('. ')
 
-            return [threadSummary.crashSummary, threadSummary.failSummary].filter(s => s).join('. ')
+            if (summary) 'No tests failed!'
+
+            return 'No tests failed!';
         })();
 
-        if (threadSummary.summary) {
-            threadSummary.summary += '.';
+        console.log(`\n\n${threadSummary.summary}`);
 
-            console.log(`\n\n${threadSummary.summary}`);
-
-            fs.writeFileSync(path.resolve(reportDir, 'thread-performance-summary.txt'), threadSummary.summary);
-        }
+        fs.writeFileSync(path.resolve(reportDir, 'thread-performance-summary.txt'), threadSummary.summary);
 
         console.log(`\n\n${reportText}\n\n`);
 
