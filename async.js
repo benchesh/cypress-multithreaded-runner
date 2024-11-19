@@ -137,6 +137,7 @@ module.exports = async (config = {}) => {
     const threadInactivityTimeout = fullConfig.threadInactivityTimeout ?? 60 * 10;
     const threadTimeLimit = fullConfig.threadTimeLimit ?? 60 * 30;
 
+    const clean = fullConfig.clean;
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
     const logMode = fullConfig.logMode || 1;
     const allureReportHeading = fullConfig.allureReportHeading;
@@ -760,6 +761,10 @@ module.exports = async (config = {}) => {
         }
 
         await Promise.all(threadsArr)
+    }
+
+    if (clean) {
+        fs.rmSync(reportDir, { recursive: true });
     }
 
     await runCypressTests();

@@ -45,11 +45,13 @@ module.exports = (config = {}) => {
 
   const ignorePaths = [];
 
-  maxConcurrentThreadsArray.forEach(maxConcurrentThreads => {
+  maxConcurrentThreadsArray.forEach((maxConcurrentThreads, threadArrIndex) => {
     console.log(`Start of ${maxConcurrentThreads} max concurrent threads experiment(s)`);
     experimentArr.push([]);
 
     for (let i = 0; i < repeat; i++) {
+      const firstRun = !i && !threadArrIndex;
+
       experimentArr[experimentArr.length - 1].push({
         timeTaken: performance.now(),
         timeStarted: (new Date()),
@@ -63,6 +65,7 @@ module.exports = (config = {}) => {
         runCmr({
           ...fullConfig,
           allureReportDir: null,
+          clean: fullConfig.clean && firstRun,
           maxConcurrentThreadsExperimentInProg: true,
           maxConcurrentThreads,
           saveThreadBenchmark: false,
