@@ -242,7 +242,6 @@ module.exports = async (config = {}) => {
     });
 
     const benchmarkObj = filterObj({
-        benchmarkDescription,
         threadMode,
         specFiles,
         onlyPhaseNo,
@@ -259,7 +258,7 @@ module.exports = async (config = {}) => {
         }),
     });
 
-    const benchmarkId = btoa(JSON.stringify(benchmarkObj));
+    const benchmarkId = benchmarkDescription || btoa(JSON.stringify(benchmarkObj));
 
     const openAllure = fullConfig.openAllure;
     const combineAllure = fullConfig.combineAllure ?? true;
