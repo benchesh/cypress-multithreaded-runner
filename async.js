@@ -447,9 +447,16 @@ module.exports = async (config = {}) => {
 
         threadsMeta[threadNo].pid = cypressProcess.pid;
         threadsMeta[threadNo].emitter = new events.EventEmitter();
+        
+        const retriesOnStart = threadsMeta[threadNo].retries;
 
         threadsMeta[threadNo].fallbackCloseFunc = () => {
             threadsMeta[threadNo].fallbackCloseTimer = setTimeout(() => {
+                // if thread has since been restarted since this fallback function was called, don't stop the thread!
+                if (retriesOnStart !== threadsMeta[threadNo].retries) {
+                    return;
+                }
+
                 console.warn(`Fallback exit function on thread #${threadNo}`);
                 threadsMeta[threadNo].emitter.emit('exit');
             }, 5000);
@@ -600,12 +607,17 @@ module.exports = async (config = {}) => {
 
         logCheck(`Start of thread #${threadNo}:\n`);
 
-        const threadCompleteFunc = () => {
+        const threadCompleteFunc = (forceFail) => {
             clearTimeout(threadsMeta[threadNo].threadTimeLimitTimer);
             printAllLogs();
 
+            if (forceFail) {
+                threadsMeta[threadNo].status = 'error';
+                threadsMeta[threadNo].errorType = 'critical';
+            }
+
             if (
-                !threadsMeta[threadNo].logs.includes('All specs passed')
+                (!threadsMeta[threadNo].logs.includes('All specs passed') || forceFail)
                 && (!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock)
                 && threadsMeta[threadNo].phaseNo < Object.keys(cypressConfigPhasesSorted).length
             ) {
@@ -671,7 +683,7 @@ module.exports = async (config = {}) => {
                         exitCode = 1;
 
                         customWarning(`CRITICAL ERROR: Too many internal Cypress errors in thread #${threadNo}. Giving up after ${maxThreadRestarts} attempts!`);
-                        threadCompleteFunc();
+                        threadCompleteFunc(true);
                     }
 
                     resolve();
