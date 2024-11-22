@@ -146,7 +146,50 @@ module.exports = async (config = {}) => {
     const saveThreadBenchmark = fullConfig.saveThreadBenchmark ?? true;
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
     const benchmarkDescription = fullConfig.benchmarkDescription ?? null;
-    const specFiles = fullConfig.specFiles ?? null;
+
+    const specFiles = await (async () => {
+        if (!fullConfig.runFailedSpecFilesFromReportURL) {
+            return fullConfig.specFiles ?? null;
+        }
+
+        let htmlStr = '';
+
+        async function curlFile() {
+            const testy = spawn('bash', [
+                path.resolve(__dirname, 'curl.sh'),
+                fullConfig.runFailedSpecFilesFromReportURL
+            ]);
+
+            testy.stdout.on('data', (data) => htmlStr += `${data.toString()}\n`);
+
+            return new Promise((resolve) => {
+                testy.on('close', () => {
+                    resolve();
+                });
+            });
+        }
+
+        await curlFile();
+
+        const { parse } = require('node-html-parser');
+
+        let files = null;
+
+        try {
+            files = JSON.parse(parse(htmlStr).querySelector('#cmr-run-config').textContent).fails;
+        } catch (err) {
+            throw new Error(`Failed to parse the report URL: ${fullConfig.runFailedSpecFilesFromReportURL}`);
+        }
+
+        if (!files.length) {
+            throw new Error(`No failed spec files were found in the report URL ${fullConfig.runFailedSpecFilesFromReportURL}`);
+        } else {
+            console.log(`${files.length} failed spec file${files.length === 1 ? '' : 's'} were found in the report URL:\n${files.join('\n')}\n`)
+        }
+
+        return files;
+    })();
+
     const notifications = fullConfig.notify ?? true;
 
     const generateAllure = fullConfig.generateAllure;
@@ -346,42 +389,46 @@ module.exports = async (config = {}) => {
 
     cypressConfigPhasesSorted.forEach((phase, phaseIndex) => {
         const phaseNo = Number(phaseIndex) + 1;
-        initLogs.push(`[PHASE ${phaseNo}]`)
+        initLogs.push(`[PHASE ${phaseNo}]`);
+
+        let skipLoop = false;
 
         if (!phase.length) {
             initLogs[initLogs.length - 1] += ' (No spec files found, skipping)';
-            return;
+            skipLoop = true;
         }
 
         if (userSkippingPhase(phaseNo)) {
             initLogs[initLogs.length - 1] += ' (Skipping phase)';
-            return;
+            skipLoop = true;
         }
 
-        for (let i = 0; i < repeat; i++) {
-            phase.forEach((thread) => {
-                const threadNo = Number(Object.values(threadsMeta).length) + 1;
-                const threadPath = String(thread.specPattern);
+        if (!skipLoop) {
+            for (let i = 0; i < repeat; i++) {
+                phase.forEach((thread) => {
+                    const threadNo = Number(Object.values(threadsMeta).length) + 1;
+                    const threadPath = String(thread.specPattern);
 
-                threadsMeta[threadNo] = {
-                    cypressConfigFilepath: phases[phaseIndex].cypressConfigFilepath,
-                    cypressConfig: JSON.stringify(thread),
-                    browser: phases[phaseIndex].browser,
-                    path: threadPath,
-                    phaseNo,
-                    threadNo,
-                    status: 'success',
-                    retries: 0,
-                    perfResults: {},
-                    logs: '',
-                    printedLogs: false,
-                    additionalCypressEnvArgs: phases[phaseIndex].additionalCypressEnvArgs,
-                    mochaFile: fullConfig.jUnitReport?.enabled ? path.join(jUnitReportDir, `${String(threadNo)}.xml`) : null,
-                    killFunc: () => { threadsMeta[threadNo].skip = true }
-                }
+                    threadsMeta[threadNo] = {
+                        cypressConfigFilepath: phases[phaseIndex].cypressConfigFilepath,
+                        cypressConfig: JSON.stringify(thread),
+                        browser: phases[phaseIndex].browser,
+                        path: threadPath,
+                        phaseNo,
+                        threadNo,
+                        status: 'success',
+                        retries: 0,
+                        perfResults: {},
+                        logs: '',
+                        printedLogs: false,
+                        additionalCypressEnvArgs: phases[phaseIndex].additionalCypressEnvArgs,
+                        mochaFile: fullConfig.jUnitReport?.enabled ? path.join(jUnitReportDir, `${String(threadNo)}.xml`) : null,
+                        killFunc: () => { threadsMeta[threadNo].skip = true }
+                    }
 
-                initLogs[initLogs.length - 1] += `\nThread ${threadNo}: "${threadPath}"${!savedThreadBenchmark[benchmarkId]?.order.includes(threadPath) ? ' (not found in benchmark)' : ''}`;
-            });
+                    initLogs[initLogs.length - 1] += `\nThread ${threadNo}: "${threadPath}"${!savedThreadBenchmark[benchmarkId]?.order.includes(threadPath) ? ' (not found in benchmark)' : ''}`;
+                });
+            }
         }
 
         if (phases[phaseIndex].onlyRunSpecFilesIncludingAnyText) {
@@ -447,7 +494,7 @@ module.exports = async (config = {}) => {
 
         threadsMeta[threadNo].pid = cypressProcess.pid;
         threadsMeta[threadNo].emitter = new events.EventEmitter();
-        
+
         const retriesOnStart = threadsMeta[threadNo].retries;
 
         threadsMeta[threadNo].fallbackCloseFunc = () => {
@@ -1175,6 +1222,12 @@ module.exports = async (config = {}) => {
             })();
 
             const cmrAllureBody = `<body>
+                <div class="cmr-hidden">
+                <script type="application/json" id="cmr-run-config">${JSON.stringify({
+                fails: allErrorThreads.map(threadNo => threadsMeta[threadNo].path),
+                fullConfig,
+            }, null, 4)}</script>
+                </div>
                 <div class="cmr-content cmr-header">
                     <div class="cmr-${status} cmr-headline"><h2 id="cmr-collapse">⬇️</h2><h2>${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
                     ${(criticalErrorThreads.length || timeoutErrorThreads.length) ? `
