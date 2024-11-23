@@ -266,6 +266,9 @@ module.exports = async (config = {}) => {
 
     const defaultAllureReportDir = fullConfig.defaultAllureReportDir;
     const allureReportDir = fullConfig.allureReportDir;
+    const defaultAllureHistoryDir = path.resolve(fullConfig.reportDir, 'allure-results', 'history');
+    const allureHistoryDir = fullConfig.allureHistoryDir ?? defaultAllureHistoryDir;
+    const overwriteAllureHistory = fullConfig.overwriteAllureHistory ?? true;
     const jUnitReportDir = path.join(reportDir, 'junit');
 
     const threadLogsDir = path.join(reportDir, 'cypress-logs');
@@ -346,7 +349,7 @@ module.exports = async (config = {}) => {
     const cypressConfigPhasesSorted = [];
 
     // raw test results are saved to this directory, which are then used to create the Allure report
-    const allureResultsPath = path.resolve(path.join(reportDir, 'allure-results'));
+    const allureResultsPath = path.resolve(reportDir, 'allure-results');
 
     const savedThreadBenchmark = fs.existsSync(threadBenchmarkFilepath) ? (() => {
         try {
@@ -825,6 +828,18 @@ module.exports = async (config = {}) => {
         fs.rmSync(reportDir, { recursive: true });
     }
 
+    if (
+        allureHistoryDir
+        && allureHistoryDir !== defaultAllureHistoryDir
+        && fs.existsSync(allureHistoryDir)
+    ) {
+        fs.copySync(
+            allureHistoryDir,
+            defaultAllureHistoryDir,
+            { overwrite: true }
+        );
+    }
+
     await runCypressTests();
 
     if (logMode === 4) {
@@ -1181,6 +1196,20 @@ module.exports = async (config = {}) => {
                 console.error(red(`ERROR: JUnit report failed to upload to ${endpoint}:`), err);
             }
         }
+    }
+
+    const updatedAllureHistoryPath = path.resolve(defaultAllureReportDir, 'history');
+
+    if (
+        overwriteAllureHistory
+        && allureHistoryDir
+        && fs.existsSync(updatedAllureHistoryPath)
+    ) {
+        fs.copySync(
+            updatedAllureHistoryPath,
+            allureHistoryDir,
+            { overwrite: true },
+        )
     }
 
     if (generateAllure) {

@@ -70,6 +70,7 @@ module.exports = (config = {}) => {
           maxConcurrentThreads,
           saveThreadBenchmark: false,
           browserStackTestObservabilityUpload: false,
+          overwriteAllureHistory: false,
         });
       } catch (e) { }
 
