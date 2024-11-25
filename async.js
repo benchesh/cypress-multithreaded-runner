@@ -858,6 +858,7 @@ module.exports = async (config = {}) => {
         nospecs: 0,
         criticals: 0,
         timeouts: 0,
+        unknowns: 0,
         criticalsArr: [],
         crashes: {},
         crashSummary: [],
@@ -1059,6 +1060,7 @@ module.exports = async (config = {}) => {
                                 return '';
                             }
 
+                            threadSummary.unknowns++;
                             result.push('Test results are missing!')
                         }
 
@@ -1095,7 +1097,8 @@ module.exports = async (config = {}) => {
             });
 
             const summary = [
-                threadSummary.nospecs ? `${threadSummary.nospecs} threads didn't contain any spec files` : null,
+                threadSummary.nospecs ? `${threadSummary.nospecs} thread${threadSummary.nospecs === 1 ? '' : 's'} didn't contain any spec files` : null,
+                threadSummary.unknowns ? `Test results are missing from ${threadSummary.unknowns} thread${threadSummary.unknowns === 1 ? '' : 's'}` : null,
                 arrToNaturalStr(threadSummary.criticalsArr),
                 arrToNaturalStr(threadSummary.crashSummary),
                 arrToNaturalStr(threadSummary.failSummary)
