@@ -601,22 +601,26 @@ module.exports = async (config = {}) => {
 
             logs += log;
 
+            const logLC = log.toLowerCase();
+
             if (
-                log.includes('uncaught error was detected outside of a test')
-                || log.includes('we are skipping the remaining tests in the current suite')
-                || log.includes('Cypress could not associate this error to any specific test.')
-                || log.includes('Cypress: Fatal IO error')
-                || log.includes('Webpack Compilation Error')
+                logLC.includes('uncaught error was detected outside of a test')
+                || logLC.includes('we are skipping the remaining tests in the current suite')
+                || logLC.includes('we have failed the current spec')
+                || logLC.includes('we detected that the chromium renderer process just crashed')
+                || logLC.includes('cypress could not associate this error to any specific test.')
+                || logLC.includes('cypress: fatal io error')
+                || logLC.includes('webpack compilation error')
             ) {
                 restartTests = true;
 
                 threadsMeta[threadNo].killFunc();
-            } else if (log.includes('no spec files were found')) {
+            } else if (logLC.includes('no spec files were found')) {
                 threadsMeta[threadNo].status = 'error';
                 threadsMeta[threadNo].errorType = 'no-spec-files';
 
                 threadsMeta[threadNo].killFunc();
-            } else if (!threadStarted && log.includes('(Run Starting)')) {
+            } else if (!threadStarted && logLC.includes('(run starting)')) {
                 threadStarted = true;
                 threadDelayTout.clearTimeout();
             }
@@ -660,33 +664,31 @@ module.exports = async (config = {}) => {
             clearTimeout(threadsMeta[threadNo].threadTimeLimitTimer);
             printAllLogs();
 
-            if (forceFail) {
+            if (!threadsMeta[threadNo].logs.includes('All specs passed') || forceFail) {
                 threadsMeta[threadNo].status = 'error';
-                threadsMeta[threadNo].errorType = 'critical';
-            }
 
-            if (
-                (!threadsMeta[threadNo].logs.includes('All specs passed') || forceFail)
-                && (!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock)
-                && threadsMeta[threadNo].phaseNo < Object.keys(cypressConfigPhasesSorted).length
-            ) {
-                phaseLock = threadsMeta[threadNo].phaseNo;
+                if (
+                    (!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock)
+                    && threadsMeta[threadNo].phaseNo < Object.keys(cypressConfigPhasesSorted).length
+                ) {
+                    phaseLock = threadsMeta[threadNo].phaseNo;
 
-                const threadsFromPhasesAfterCurrent = Object.values(threadsMeta).filter(thread => thread.phaseNo > phaseLock);
+                    const threadsFromPhasesAfterCurrent = Object.values(threadsMeta).filter(thread => thread.phaseNo > phaseLock);
 
-                if (threadsFromPhasesAfterCurrent.length) {
-                    customWarning(orange(`Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately. Any remaining threads from phase ${phaseLock} will continue running.`))
+                    if (threadsFromPhasesAfterCurrent.length) {
+                        customWarning(orange(`Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately. Any remaining threads from phase ${phaseLock} will continue running.`))
 
-                    threadsFromPhasesAfterCurrent.forEach((thread) => {
-                        if (!threadsMeta[thread.threadNo].logs.includes('All specs passed')) {
-                            threadsMeta[thread.threadNo].status = 'error';
-                            threadsMeta[thread.threadNo].errorType = 'critical';
-                            threadsMeta[thread.threadNo].perfResults.secs = undefined;
-                            threadsMeta[thread.threadNo].perfResults.startTime = undefined;
-                        }
+                        threadsFromPhasesAfterCurrent.forEach((thread) => {
+                            if (!threadsMeta[thread.threadNo].logs.includes('All specs passed')) {
+                                threadsMeta[thread.threadNo].status = 'error';
+                                threadsMeta[thread.threadNo].errorType = 'critical';
+                                threadsMeta[thread.threadNo].perfResults.secs = undefined;
+                                threadsMeta[thread.threadNo].perfResults.startTime = undefined;
+                            }
 
-                        threadsMeta[thread.threadNo].killFunc();
-                    });
+                            threadsMeta[thread.threadNo].killFunc();
+                        });
+                    }
                 }
             }
 
@@ -871,6 +873,8 @@ module.exports = async (config = {}) => {
             const failedTests = {};
             let mostFailsForOneTest = 0;
 
+            let verifiedThread = false;
+
             // record how many tests failed, and how many times!
             getFiles(
                 path.join(allureResultsPath, String(thread.threadNo)),
@@ -895,6 +899,8 @@ module.exports = async (config = {}) => {
                                 mostFailsForOneTest = failedTests[key];
                             }
                         }
+
+                        verifiedThread = true;
                     } catch (err) { }
                 }
 
@@ -905,6 +911,10 @@ module.exports = async (config = {}) => {
                     { overwrite: true },
                 );
             });
+
+            if (!verifiedThread) {
+                threadsMeta[thread.threadNo].status = 'error';
+            }
 
             threadsMeta[thread.threadNo].perfResults = {
                 ...thread.perfResults,
@@ -1045,7 +1055,11 @@ module.exports = async (config = {}) => {
                         }
 
                         if (!result.length) {
-                            return '';
+                            if (threadsMeta[thread.threadNo].status === 'success' || threadsMeta[thread.threadNo].errorType) {
+                                return '';
+                            }
+
+                            result.push('Test results are missing!')
                         }
 
                         threadsMeta[thread.threadNo].heading.push(`WARNING: ${arrToNaturalStr(result)}`);
