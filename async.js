@@ -178,13 +178,13 @@ module.exports = async (config = {}) => {
         try {
             files = JSON.parse(parse(htmlStr).querySelector('#cmr-run-config').textContent).fails;
         } catch (err) {
-            throw new Error(`Failed to parse the report URL: ${fullConfig.runFailedSpecFilesFromReportURL}`);
+            throw new Error(`Failed to parse the report URL "${fullConfig.runFailedSpecFilesFromReportURL}"`);
         }
 
         if (!files.length) {
-            throw new Error(`No failed spec files were found in the report URL ${fullConfig.runFailedSpecFilesFromReportURL}`);
+            throw new Error(`No failed spec files were found in the report URL "${fullConfig.runFailedSpecFilesFromReportURL}"`);
         } else {
-            console.log(`${files.length} failed spec file${files.length === 1 ? '' : 's'} were found in the report URL:\n${files.join('\n')}\n`)
+            console.log(`${files.length} failed spec file${files.length === 1 ? '' : 's'} were found in the report URL "${fullConfig.runFailedSpecFilesFromReportURL}":\n${files.join('\n')}\n`)
         }
 
         return files;
