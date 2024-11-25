@@ -19,6 +19,7 @@
     "@mmisty/cypress-allure-adapter": "^3.2.2",
     "allure-combined": "^0.0.1",
     "allure-commandline": "^2.32.0",
+    "allure-cypress": "^3.0.6",
     "fs-extra": "^11.2.0",
     "junit-report-merger": "^7.0.0",
     "kill-sync": "^1.0.3",
