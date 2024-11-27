@@ -273,10 +273,20 @@ module.exports = async (config = {}) => {
 
     const threadLogsDir = path.join(reportDir, 'cypress-logs');
 
-    const runShellCommand = (cmd, cwd = path.resolve(reportDir)) => {
-        execSync(cmd, {
+    const runShellCommand = (
+        cmd,
+        cwd = fs.existsSync(reportDir) ? path.resolve(reportDir) : undefined,
+        returnOutput = false,
+    ) => {
+        if (!returnOutput) {
+            execSync(cmd, {
+                cwd,
+                stdio: [null, process.stdout, process.stderr]
+            });
+        }
+
+        return execSync(cmd, {
             cwd,
-            stdio: [null, process.stdout, process.stderr]
         });
     };
 
@@ -501,6 +511,8 @@ module.exports = async (config = {}) => {
 
         threadsMeta[threadNo].fallbackCloseFunc = () => {
             threadsMeta[threadNo].fallbackCloseTimer = setTimeout(() => {
+                console.warn(`Fallback exit function on thread #${threadNo} (pid: ${cypressProcess.pid})`);
+
                 if (cypressProcess.pid) kill(cypressProcess.pid); // failsafe (might not be needed)
 
                 // if thread has since been restarted since this fallback function was called, don't stop the thread!
@@ -508,7 +520,6 @@ module.exports = async (config = {}) => {
                     return;
                 }
 
-                console.warn(`Fallback exit function on thread #${threadNo}`);
                 threadsMeta[threadNo].emitter.emit('exit');
             }, 5000);
         }
@@ -1171,6 +1182,8 @@ module.exports = async (config = {}) => {
         }
     }
 
+    let browserStackObservabilityURL;
+
     if (fullConfig.jUnitReport?.enabled) {
         const { mergeFiles } = require('junit-report-merger');
 
@@ -1208,7 +1221,17 @@ module.exports = async (config = {}) => {
                         })
                 );
 
-                runShellCommand(`curl -u "${browserStackObservability.username}:${browserStackObservability.accessKey}" -vvv -X POST -F "data=@${path.basename(outputFileBSO)}" ${Object.keys(browserStackObservability.parameters || {}).map(key => `-F "${key}=${browserStackObservability.parameters[key]}"`).join(' ')} ${endpoint}`, path.dirname(outputFileBSO))
+                const bsoUploadResp = runShellCommand(
+                    `curl -u "${browserStackObservability.username}:${browserStackObservability.accessKey}" -X POST -F "data=@${path.basename(outputFileBSO)}" ${Object.keys(browserStackObservability.parameters || {}).map(key => `-F "${key}=${browserStackObservability.parameters[key]}"`).join(' ')} ${endpoint}`,
+                    path.dirname(outputFileBSO),
+                    true
+                )
+
+                const bsoUploadMessage = JSON.parse(bsoUploadResp || {}).message || '';
+
+                if (bsoUploadMessage.includes('https://')) {
+                    browserStackObservabilityURL = bsoUploadMessage.substring(bsoUploadMessage.indexOf('https://'));
+                }
 
                 console.log(`\n\nUploaded JUnit report to ${endpoint}\n`);
             } catch (err) {
@@ -1268,6 +1291,8 @@ module.exports = async (config = {}) => {
                 return 'success';
             })();
 
+            const headerMsg = `Scroll down to read the full logs from the separate threads.${browserStackObservabilityURL ? `<br><br><strong>View the BrowserStack Test Observability report here: <a href="${browserStackObservabilityURL}">${browserStackObservabilityURL}</a></strong>` : ''}`
+
             const cmrAllureBody = `<body>
                 <div class="cmr-hidden">
                 <script type="application/json" id="cmr-run-config">${JSON.stringify({
@@ -1279,19 +1304,19 @@ module.exports = async (config = {}) => {
                     <div class="cmr-${status} cmr-headline"><h2 id="cmr-collapse">⬇️</h2><h2>${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
                     ${(criticalErrorThreads.length || timeoutErrorThreads.length) ? `
                     <div class="cmr-error cmr-summary">
-                        Be advised! This Allure report doesn't tell the full story. ${phaseLock ? `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>` : ''}${criticalErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete!` : ''}${timeoutErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</strong> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.` : ''} Therefore, one or more spec files may have not been fully tested! Scroll down to read the full logs from the separate threads.
+                        Be advised! This Allure report doesn't tell the full story. ${phaseLock ? `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>` : ''}${criticalErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete!` : ''}${timeoutErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</strong> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.` : ''} Therefore, one or more spec files may have not been fully tested! ${headerMsg}
                     </div>` : ''}
                     ${minorErrorThreads.length ? `
                     <div class="cmr-error cmr-summary">
-                        ${minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${(!criticalErrorThreads.length && !timeoutErrorThreads.length) ? '<br>Scroll down to read the full logs from the separate threads.' : ''}
+                        ${minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${(!criticalErrorThreads.length && !timeoutErrorThreads.length) ? `<br>${headerMsg}` : ''}
                     </div>` : ''}
                     ${warnThreads.length ? `
                     <div class="cmr-warn cmr-summary">
-                        ${warnThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${status === 'warn' ? '<br>Scroll down to read the full logs from the separate threads.' : ''}
+                        ${warnThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${status === 'warn' ? `<br>${headerMsg}` : ''}
                     </div>` : ''}
                     ${status === 'success' ? `
                     <div class="cmr-success cmr-summary">
-                        Everything seems completely fine! No tests needed retrying. Scroll down to read the full logs from the separate threads.
+                        Everything seems completely fine! No tests needed retrying. ${headerMsg}
                     </div>
                     `: ''}
                     ${reportHeadNotes.length ? `
@@ -1513,6 +1538,10 @@ module.exports = async (config = {}) => {
         if (fs.existsSync(waitForFileExistFilepath)) {
             fs.unlinkSync(waitForFileExistFilepath);
         }
+    }
+
+    if (browserStackObservabilityURL) {
+        console.log(green(`View the BrowserStack Test Observability report here: "${browserStackObservabilityURL}"`));
     }
 
     notify(exitCode === 0 ? 'Tests completed (all passed)' : 'Tests completed (with failures)');

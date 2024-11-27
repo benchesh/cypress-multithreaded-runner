@@ -22,5 +22,4 @@ fi
 echo Thread \#"$threadNo" has completed.
 
 echo "<FALLBACK_SHELL_EXIT>"
-pstree -A -p $$ | grep -Eow "[0-9]+" | xargs kill
 
