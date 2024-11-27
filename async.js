@@ -8,7 +8,7 @@ const fs = require('fs-extra');
 const { execSync, spawn } = require('child_process');
 
 const killSync = require('kill-sync');
-const kill = (pid) => killSync(pid, 'SIGINT', true);
+const kill = (pid) => killSync(pid, 'SIGKILL', true);
 
 const path = require('path');
 
@@ -501,6 +501,8 @@ module.exports = async (config = {}) => {
 
         threadsMeta[threadNo].fallbackCloseFunc = () => {
             threadsMeta[threadNo].fallbackCloseTimer = setTimeout(() => {
+                if (cypressProcess.pid) kill(cypressProcess.pid); // failsafe (might not be needed)
+
                 // if thread has since been restarted since this fallback function was called, don't stop the thread!
                 if (retriesOnStart !== threadsMeta[threadNo].retries) {
                     return;
