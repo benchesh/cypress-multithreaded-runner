@@ -1296,8 +1296,10 @@ module.exports = async (config = {}) => {
             const cmrAllureBody = `<body>
                 <div class="cmr-hidden">
                 <script type="application/json" id="cmr-run-config">${JSON.stringify({
+                browserStackObservabilityURL,
                 fails: allErrorThreads.map(threadNo => threadsMeta[threadNo].path),
                 fullConfig,
+                summary: threadSummary.summary,
             }, null, 4)}</script>
                 </div>
                 <div class="cmr-content cmr-header">
