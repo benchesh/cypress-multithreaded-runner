@@ -726,7 +726,13 @@ module.exports = async (config = {}) => {
                 clearTimeout(threadsMeta[threadNo].threadInactivityTimer);
                 clearTimeout(threadsMeta[threadNo].fallbackCloseTimer);
 
-                if (restartTests) {
+                if (
+                    restartTests
+                    || (
+                        !threadsMeta[threadNo].errorType
+                        && !threadsMeta[threadNo].logs.includes('(Run Finished)')
+                    )
+                ) {
                     restartAttempts++;
                     threadsMeta[threadNo].retries++;
 
