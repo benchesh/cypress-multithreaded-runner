@@ -122,6 +122,12 @@ const filterObj = (obj) => {
     }, {})
 }
 
+const getTimeStr = () => {
+    const t = new Date();
+
+    return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}:${String(t.getSeconds()).padStart(2, '0')}`;
+}
+
 module.exports = async (config = {}) => {
     const startTime = performance.now();
 
@@ -432,6 +438,7 @@ module.exports = async (config = {}) => {
                         retries: 0,
                         perfResults: {},
                         logs: '',
+                        logsTimestamped: [],
                         printedLogs: false,
                         additionalCypressEnvArgs: phases[phaseIndex].additionalCypressEnvArgs,
                         mochaFile: fullConfig.jUnitReport?.enabled ? path.join(jUnitReportDir, `${String(threadNo)}.xml`) : null,
@@ -491,7 +498,15 @@ module.exports = async (config = {}) => {
 
     let phaseLock;
 
-    async function spawnThread(threadNo, logs = '', restartAttempts = 0, threadStarted = false) {
+    const customWarning = (threadNo, log) => {
+        console.warn(orange(log));
+        threadsMeta[threadNo].logsTimestamped.push([
+            getTimeStr(),
+            log.startsWith('\n') && log.trim() ? `\n${log}` : log // this keeps the extra line if the log starts with one
+        ]);
+    }
+
+    async function spawnThread(threadNo, restartAttempts = 0, threadStarted = false) {
         const cypressProcess = spawn('bash', [
             path.resolve(__dirname, 'shell.sh'),
             // arguments for the shell script
@@ -552,17 +567,12 @@ module.exports = async (config = {}) => {
 
         if (!threadsMeta[threadNo].retries) threadsMeta[threadNo].perfResults.startTime = performance.now();
 
-        const customWarning = (str) => {
-            console.warn(orange(str));
-            logs += `${str}\n`;
-        }
-
         const setThreadInactivityTimer = () => {
             if (!threadInactivityTimeout) return;
 
             clearTimeout(threadsMeta[threadNo].threadInactivityTimer);
             threadsMeta[threadNo].threadInactivityTimer = setTimeout(() => {
-                customWarning(`The Cypress instance in thread #${threadNo} hasn\'t responded for ${secondsToNaturalString(threadInactivityTimeout)} and will be considered a crash.`);
+                customWarning(threadNo, `The Cypress instance in thread #${threadNo} hasn\'t responded for ${secondsToNaturalString(threadInactivityTimeout)} and will be considered a crash.`);
 
                 restartTests = true;
 
@@ -576,7 +586,7 @@ module.exports = async (config = {}) => {
             if (!threadTimeLimit || threadsMeta[threadNo].threadTimeLimitTimer) return;
 
             threadsMeta[threadNo].threadTimeLimitTimer = setTimeout(() => {
-                customWarning(`CRITICAL ERROR: The Cypress instance in thread #${threadNo} has failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}. It will now stop running immediately.`);
+                customWarning(threadNo, `CRITICAL ERROR: The Cypress instance in thread #${threadNo} has failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}. It will now stop running immediately.`);
 
                 threadsMeta[threadNo].status = 'error';
                 threadsMeta[threadNo].errorType = 'timeout';
@@ -598,6 +608,7 @@ module.exports = async (config = {}) => {
             }
 
             threadsMeta[threadNo].logs += log;
+            threadsMeta[threadNo].logsTimestamped.push([getTimeStr(), log.startsWith('\n') && log.trim() ? `\n${log}` : log]);
 
             if (logMode > 2) {
                 process.stdout.write(log);
@@ -611,8 +622,6 @@ module.exports = async (config = {}) => {
             }
 
             setThreadInactivityTimer();
-
-            logs += log;
 
             const logLC = log.toLowerCase();
 
@@ -689,7 +698,7 @@ module.exports = async (config = {}) => {
                     const threadsFromPhasesAfterCurrent = Object.values(threadsMeta).filter(thread => thread.phaseNo > phaseLock);
 
                     if (threadsFromPhasesAfterCurrent.length) {
-                        customWarning(orange(`Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately. Any remaining threads from phase ${phaseLock} will continue running.`))
+                        customWarning(threadNo, `Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately. Any remaining threads from phase ${phaseLock} will continue running.`)
 
                         threadsFromPhasesAfterCurrent.forEach((thread) => {
                             if (!threadsMeta[thread.threadNo].logs.includes('All specs passed')) {
@@ -705,7 +714,7 @@ module.exports = async (config = {}) => {
                 }
             }
 
-            writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), logs);
+            writeFileSyncRecursive(path.join(threadLogsDir, `thread_${threadNo}.txt`), threadsMeta[threadNo].logs);
 
             // the thread might not have been marked as started if it never started properly!
             if (!threadStarted) threadStarted = true;
@@ -739,20 +748,20 @@ module.exports = async (config = {}) => {
                     if (restartAttempts < maxThreadRestarts) {
                         threadsMeta[threadNo].status = 'warn';
 
-                        customWarning(`WARNING: Internal Cypress error in thread #${threadNo}! Will retry a maximum of ${maxThreadRestarts - restartAttempts} more time${(maxThreadRestarts - restartAttempts) !== 1 ? 's' : ''}.`);
+                        customWarning(threadNo, `WARNING: Internal Cypress error in thread #${threadNo}! Will retry a maximum of ${maxThreadRestarts - restartAttempts} more time${(maxThreadRestarts - restartAttempts) !== 1 ? 's' : ''}.`);
 
                         // delete any test results as they'll interfere with the next run
                         if (fs.pathExistsSync(path.join(allureResultsPath, String(threadNo)))) {
                             fs.rmSync(path.join(allureResultsPath, String(threadNo)), { recursive: true, force: true });
                         }
 
-                        await spawnThread(threadNo, logs, restartAttempts, threadStarted);
+                        await spawnThread(threadNo, restartAttempts, threadStarted);
                     } else {
                         threadsMeta[threadNo].status = 'error';
                         threadsMeta[threadNo].errorType = 'critical';
                         exitCode = 1;
 
-                        customWarning(`CRITICAL ERROR: Too many internal Cypress errors in thread #${threadNo}. Giving up after ${maxThreadRestarts} attempts!`);
+                        customWarning(threadNo, `CRITICAL ERROR: Too many internal Cypress errors in thread #${threadNo}. Giving up after ${maxThreadRestarts} attempts!`);
                         threadCompleteFunc(true);
                     }
 
@@ -781,19 +790,14 @@ module.exports = async (config = {}) => {
                     stopWaitingForFileWhenFirstThreadCompletes
                     && Object.values(threadsMeta).find(thread => thread.complete)
                 ) {
-                    //TODO not the best solution, too bad!
-                    thread2ExtraLog = `WARNING: There may be an issue as the first thread has completed but the "${waitForFileExistFilepath}" file doesn't exist... will continue anyway!`;
-                    console.warn(orange(thread2ExtraLog));
-
+                    customWarning(2, `WARNING: There may be an issue as the first thread has completed but the "${waitForFileExistFilepath}" file doesn't exist... will continue anyway!`)
                     clearInterval(interv);
                     resolve();
                 } else {
                     waitForFileExistRemainingTime -= 0.5;
 
                     if (waitForFileExistRemainingTime <= 0) {
-                        //TODO not the best solution, too bad!
-                        thread2ExtraLog = `WARNING: There may be an issue as the "${waitForFileExistFilepath}" file doesn't exist after ${waitForFileExistTimeout} seconds... will continue anyway!`;
-                        console.warn(orange(thread2ExtraLog));
+                        customWarning(2, `WARNING: There may be an issue as the "${waitForFileExistFilepath}" file doesn't exist after ${waitForFileExistTimeout} seconds... will continue anyway!`)
 
                         clearInterval(interv);
                         resolve();
@@ -1007,7 +1011,7 @@ module.exports = async (config = {}) => {
                         const err = 'ERROR: No spec files found!';
                         threadsMeta[thread.threadNo].status = 'error';
                         threadsMeta[thread.threadNo].heading.push(err);
-                        threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${thread.threadNo}`;
+                        threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${thread.threadNo} [${shortThreadPath}]`;
                         str += `${err}\n\n`;
                         exitCode = 1;
                         threadSummary.nospecs++;
@@ -1084,7 +1088,7 @@ module.exports = async (config = {}) => {
                         }
 
                         threadsMeta[thread.threadNo].heading.push(`WARNING: ${arrToNaturalStr(result)}`);
-                        threadsMeta[thread.threadNo].summary = `WARNING: Thread #${thread.threadNo}: ${arrToNaturalStr(result)}`;
+                        threadsMeta[thread.threadNo].summary = `WARNING: Thread #${thread.threadNo} [${shortThreadPath}]: ${arrToNaturalStr(result)}`;
 
                         return ` (WARNING: ${arrToNaturalStr(result)})`;
                     };
@@ -1270,19 +1274,28 @@ module.exports = async (config = {}) => {
         if (fs.existsSync(defaultAllureReportHtml)) {
             let allLogs = '';
 
-            getFiles(
-                threadLogsDir
-            ).forEach((file) => {
-                const threadNo = file.split('_')[1].split('.txt')[0];
-
-                threadsMeta[threadNo].logs = `<div class="cmr-thread cmr-${threadsMeta[threadNo].status}"><span class="cmr-pre-heading cmr-sticky"><h2 id="cmr-arr-${threadNo}">➡️</h2><h2>${threadsMeta[threadNo].heading.join('<br>')}</h2></span><pre id="cmr-pre-${threadNo}" style="display:none">${threadNo === '2' && thread2ExtraLog ? `${thread2ExtraLog}\n` : ''}${fs.readFileSync(file).toString('utf8').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre></div>`;
-            });
-
-            Object.values(threadsMeta).forEach(thread => {
-                if (thread.logs) {
-                    allLogs += thread.logs;
+            Object.keys(threadsMeta).forEach((threadNo) => {
+                if (!threadsMeta[threadNo].logs) {
+                    return;
                 }
-            })
+
+                allLogs += `
+                <div class="cmr-thread cmr-${threadsMeta[threadNo].status}">
+                    <span class="cmr-pre-heading cmr-sticky">
+                        <h2 id="cmr-arr-${threadNo}">➡️</h2>
+                        <h2>${threadsMeta[threadNo].heading.join('<br>')}</h2>
+                    </span>
+                    <div id="cmr-pre-${threadNo}" style="display:none;overflow:auto;margin-top:20px;">
+                    ${threadsMeta[threadNo].logsTimestamped.map(logs => {
+                    return `<div class="cmr-thread-pre">
+                        <pre>${logs[0]}</pre>
+                        <div class="cmr-thread-log-divide"></div>
+                        <pre>${logs[1].replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
+                        </div>`
+                }).join('')}
+                    </div>
+                </div>`;
+            });
 
             const criticalErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'critical').map(o => o[0]);
             const timeoutErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'timeout').map(o => o[0]);
@@ -1297,7 +1310,15 @@ module.exports = async (config = {}) => {
                 return 'success';
             })();
 
-            const headerMsg = `Scroll down to read the full logs from the separate threads.${browserStackObservabilityURL ? `<br><br><strong>View the BrowserStack Test Observability report here: <a href="${browserStackObservabilityURL}">${browserStackObservabilityURL}</a></strong>` : ''}`
+            let printedHeaderMsg = false;
+
+            const printHeaderMsg = (msg) => {
+                if (printedHeaderMsg) return msg;
+
+                printedHeaderMsg = true;
+
+                return `${browserStackObservabilityURL ? `<strong>View the BrowserStack Test Observability report here: <a href="${browserStackObservabilityURL}">${browserStackObservabilityURL}</a></strong><br><br>` : ''}${msg}`;
+            }
 
             const cmrAllureBody = `<body>
                 <div class="cmr-hidden">
@@ -1312,19 +1333,35 @@ module.exports = async (config = {}) => {
                     <div class="cmr-${status} cmr-headline"><h2 id="cmr-collapse">⬇️</h2><h2>${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
                     ${(criticalErrorThreads.length || timeoutErrorThreads.length) ? `
                     <div class="cmr-error cmr-summary">
-                        Be advised! This Allure report doesn't tell the full story. ${phaseLock ? `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>` : ''}${criticalErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete!` : ''}${timeoutErrorThreads.length ? ` <strong>Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</strong> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.` : ''} Therefore, one or more spec files may have not been fully tested! ${headerMsg}
+                        ${printHeaderMsg((() => {
+                let str = 'Be advised! This Allure report doesn\'t tell the full story.'
+
+                if (phaseLock) {
+                    str += `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>`
+                }
+
+                if (criticalErrorThreads.length) {
+                    str += ` <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete!`;
+                }
+
+                if (timeoutErrorThreads.length) {
+                    str += ` <strong>Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</strong> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.`
+                }
+
+                return `${str} Therefore, one or more spec files may have not been fully tested!`;
+            })())}
                     </div>` : ''}
                     ${minorErrorThreads.length ? `
                     <div class="cmr-error cmr-summary">
-                        ${minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${(!criticalErrorThreads.length && !timeoutErrorThreads.length) ? `<br>${headerMsg}` : ''}
+                        ${printHeaderMsg(minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>'))}
                     </div>` : ''}
                     ${warnThreads.length ? `
                     <div class="cmr-warn cmr-summary">
-                        ${warnThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>')}${status === 'warn' ? `<br>${headerMsg}` : ''}
+                        ${printHeaderMsg(warnThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>'))}
                     </div>` : ''}
                     ${status === 'success' ? `
                     <div class="cmr-success cmr-summary">
-                        Everything seems completely fine! No tests needed retrying. ${headerMsg}
+                        ${printHeaderMsg('Everything seems completely fine! No tests needed retrying.')}
                     </div>
                     `: ''}
                     ${reportHeadNotes.length ? `
@@ -1339,9 +1376,16 @@ module.exports = async (config = {}) => {
                 }<div class="cmr-report"><button id="cmr-open-all">Open all logs above</button><button id="cmr-close-all">Close all logs above</button><br><br><h2 class="cmr-sticky">Thread Performance Summary</h2><pre>${[threadSummary.summary, reportText].filter(s => s).join('\n\n')}</pre></div></div>
                 
                     <style>
+                    .cmr-content {
+                        overflow: auto;
+                        overflow-wrap: anywhere;
+                        outline: 2px solid #343434;
+                    }
+
                     .cmr-content #cmr-close-all {
                         margin-left: 20px;
                     }
+
                     .cmr-footer h2 {
                         margin-bottom: 0;
                     }
@@ -1354,9 +1398,11 @@ module.exports = async (config = {}) => {
                         margin: 0;
                         display: inline-block;
                     }
-                
-                    .cmr-content div:nth-child(even) {
-                        filter: brightness(0.92);
+
+                    .cmr-thread-log-divide {
+                        padding: 0!important;
+                        min-width: 1px!important;
+                        background: grey!important;
                     }
                 
                     .cmr-content pre {
@@ -1374,11 +1420,24 @@ module.exports = async (config = {}) => {
                     .cmr-content div {
                         padding: 20px;
                         background: white;
-                        min-width: 890px;
+                    }
+
+                    .cmr-content > * {
+                        outline: 1px solid #343434;
                     }
 
                     .cmr-hidden {
                         display: none;
+                    }
+
+                    .cmr-thread-pre {
+                        display: flex;
+                        padding: 0!important;
+                        gap: 20px;
+                    }
+
+                    .cmr-thread-pre pre {
+                        margin: 0;
                     }
                 
                     .cmr-content div.cmr-error {
