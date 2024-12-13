@@ -1252,28 +1252,26 @@ module.exports = async (config = {}) => {
 
     const updatedAllureHistoryPath = path.resolve(defaultAllureReportDir, 'history');
 
-    if (
-        overwriteAllureHistory
-        && allureHistoryDir
-        && fs.existsSync(updatedAllureHistoryPath)
-    ) {
+    if (fs.existsSync(updatedAllureHistoryPath)) {
         getFiles(updatedAllureHistoryPath).forEach((file) => {
             if (file.endsWith('.json')) {
                 try {
                     fs.writeFileSync(file, `${JSON.stringify(JSON.parse(
                         fs.readFileSync(file).toString('utf8')
-                    ), null, 4)}\n`);   
+                    ), null, 4)}\n`);
                 } catch (err) {
                     console.warn(orange(`WARNING: Failed to parse Allure history file "${file}"`));
                 }
             }
         });
 
-        fs.copySync(
-            updatedAllureHistoryPath,
-            allureHistoryDir,
-            { overwrite: true },
-        )
+        if (overwriteAllureHistory && allureHistoryDir) {
+            fs.copySync(
+                updatedAllureHistoryPath,
+                allureHistoryDir,
+                { overwrite: true },
+            )
+        }
     }
 
     if (generateAllure) {
@@ -1554,7 +1552,7 @@ module.exports = async (config = {}) => {
                 if (historyJSONraw) {
                     fs.writeFileSync(
                         historyJSON,
-                        historyJSONraw.replace(/<script>(.*?)<\/script>/gm, '')// hack to remove some dodgy JSON that breaks allure-combine
+                        historyJSONraw.replace(/<script(.*?)<\/script>|<script(.*?)>|<\/script>/gm, '')// hack to remove some dodgy JSON that breaks allure-combine
                     )
                 }
 
@@ -1582,6 +1580,8 @@ module.exports = async (config = {}) => {
 
                     combinedAllureSuccessfully = true;
                 } catch (err) {
+                    console.log = defaultLog;
+
                     console.log(red(`Error when attempting to bundle the Allure report into a single file!${combineAllure === 'pip' ? 'You might not have pip installed. See the readme for more details.' : ''}`));
                 }
 
