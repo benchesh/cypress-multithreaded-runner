@@ -1011,7 +1011,7 @@ module.exports = async (config = {}) => {
                         const err = 'ERROR: No spec files found!';
                         threadsMeta[thread.threadNo].status = 'error';
                         threadsMeta[thread.threadNo].heading.push(err);
-                        threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${thread.threadNo} [${shortThreadPath}]`;
+                        threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${threadId} [${shortThreadPath}]`;
                         str += `${err}\n\n`;
                         exitCode = 1;
                         threadSummary.nospecs++;
@@ -1088,7 +1088,7 @@ module.exports = async (config = {}) => {
                         }
 
                         threadsMeta[thread.threadNo].heading.push(`WARNING: ${arrToNaturalStr(result)}`);
-                        threadsMeta[thread.threadNo].summary = `WARNING: Thread #${thread.threadNo} [${shortThreadPath}]: ${arrToNaturalStr(result)}`;
+                        threadsMeta[thread.threadNo].summary = `WARNING: Thread #${threadId} [${shortThreadPath}]: ${arrToNaturalStr(result)}`;
 
                         return ` (WARNING: ${arrToNaturalStr(result)})`;
                     };
@@ -1257,6 +1257,18 @@ module.exports = async (config = {}) => {
         && allureHistoryDir
         && fs.existsSync(updatedAllureHistoryPath)
     ) {
+        getFiles(updatedAllureHistoryPath).forEach((file) => {
+            if (file.endsWith('.json')) {
+                try {
+                    fs.writeFileSync(file, `${JSON.stringify(JSON.parse(
+                        fs.readFileSync(file).toString('utf8')
+                    ), null, 4)}\n`);   
+                } catch (err) {
+                    console.warn(orange(`WARNING: Failed to parse Allure history file "${file}"`));
+                }
+            }
+        });
+
         fs.copySync(
             updatedAllureHistoryPath,
             allureHistoryDir,
@@ -1377,7 +1389,6 @@ module.exports = async (config = {}) => {
                 
                     <style>
                     .cmr-content {
-                        overflow: auto;
                         overflow-wrap: anywhere;
                         outline: 2px solid #343434;
                     }
@@ -1537,6 +1548,16 @@ module.exports = async (config = {}) => {
             let combinedAllureSuccessfully = false;
 
             if (combineAllure) {
+                const historyJSON = path.resolve(updatedAllureHistoryPath, 'history.json');
+                const historyJSONraw = fs.existsSync(historyJSON) && fs.readFileSync(historyJSON).toString('utf8');
+
+                if (historyJSONraw) {
+                    fs.writeFileSync(
+                        historyJSON,
+                        historyJSONraw.replace(/<script>(.*?)<\/script>/gm, '')// hack to remove some dodgy JSON that breaks allure-combine
+                    )
+                }
+
                 try {
                     if (combineAllure === 'pip') {
                         runShellCommand('pip install --upgrade allure-combine && allure-combine allure-report');
@@ -1562,6 +1583,13 @@ module.exports = async (config = {}) => {
                     combinedAllureSuccessfully = true;
                 } catch (err) {
                     console.log(red(`Error when attempting to bundle the Allure report into a single file!${combineAllure === 'pip' ? 'You might not have pip installed. See the readme for more details.' : ''}`));
+                }
+
+                if (historyJSONraw) {
+                    fs.writeFileSync(
+                        historyJSON,
+                        historyJSONraw// put the raw JSON back!
+                    )
                 }
             }
 
