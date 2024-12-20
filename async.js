@@ -162,7 +162,7 @@ module.exports = async (config = {}) => {
 
         async function curlFile() {
             const testy = spawn('bash', [
-                path.resolve(__dirname, 'curl.sh'),
+                path.resolve(__dirname, 'shell', 'curl.sh'),
                 fullConfig.runFailedSpecFilesFromReportURL
             ]);
 
@@ -508,7 +508,7 @@ module.exports = async (config = {}) => {
 
     async function spawnThread(threadNo, restartAttempts = 0, threadStarted = false) {
         const cypressProcess = spawn('bash', [
-            path.resolve(__dirname, 'shell.sh'),
+            path.resolve(__dirname, 'shell', 'cypress.sh'),
             // arguments for the shell script
             allureResultsPath || '',// $1
             threadsMeta[threadNo].cypressConfigFilepath || '',// $2
@@ -1160,7 +1160,21 @@ module.exports = async (config = {}) => {
     });
 
     // generate the Allure report from the most recent run
-    runShellCommand('allure generate allure-results --clean -o allure-report');
+    async function allureGenerate() {
+        const testy = spawn('bash', [
+            path.resolve(__dirname, 'shell', 'allure.sh'),
+            reportDir,
+            !!combineAllure,
+        ]);
+
+        return new Promise((resolve) => {
+            testy.on('close', () => {
+                resolve();
+            });
+        });
+    }
+
+    await allureGenerate();
 
     // make sure none of the tests failed!
     {
@@ -1536,37 +1550,15 @@ module.exports = async (config = {}) => {
                     </script>
                 </body>`;
 
-            fs.writeFileSync(
-                defaultAllureReportHtml,
-                fs.readFileSync(defaultAllureReportHtml)
-                    .toString('utf8')
-                    .replace(/.*(googletagmanager|gtag|dataLayer|<script>|\n<\/script>).*/gm, '')// hack to remove some dodgy html that breaks allure-combine
-            )
-
             let combinedAllureSuccessfully = false;
 
             if (combineAllure) {
-                const historyJSON = path.resolve(updatedAllureHistoryPath, 'history.json');
-                const historyJSONraw = fs.existsSync(historyJSON) && fs.readFileSync(historyJSON).toString('utf8');
-
-                if (historyJSONraw) {
-                    fs.writeFileSync(
-                        historyJSON,
-                        historyJSONraw.replace(/<script(.*?)<\/script>|<script(.*?)>|<\/script>/gm, '')// hack to remove some dodgy JSON that breaks allure-combine
-                    )
-                }
-
                 try {
-                    if (combineAllure === 'pip') {
-                        runShellCommand('pip install --upgrade allure-combine && allure-combine allure-report');
-                    } else {
-                        const { combineAllure: combineAllureModule } = require('allure-combined');
-
-                        // temporarily disable logs
-                        console.log = function () { };
-                        combineAllureModule(defaultAllureReportDir)
-                        console.log = defaultLog;
-                    }
+                    fs.moveSync(
+                        path.resolve(reportDir, 'allure-report-temp', 'index.html'),
+                        path.resolve(defaultAllureReportDir, 'complete.html'),
+                        { overwrite: true },
+                    );
 
                     fs.writeFileSync(
                         defaultAllureReportHtmlComplete,
@@ -1582,14 +1574,7 @@ module.exports = async (config = {}) => {
                 } catch (err) {
                     console.log = defaultLog;
 
-                    console.log(red(`Error when attempting to bundle the Allure report into a single file!${combineAllure === 'pip' ? 'You might not have pip installed. See the readme for more details.' : ''}`));
-                }
-
-                if (historyJSONraw) {
-                    fs.writeFileSync(
-                        historyJSON,
-                        historyJSONraw// put the raw JSON back!
-                    )
+                    console.log(red('Error when attempting to bundle the Allure report into a single file!'));
                 }
             }
 
