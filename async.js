@@ -289,6 +289,7 @@ module.exports = async (config = {}) => {
                 cwd,
                 stdio: [null, process.stdout, process.stderr]
             });
+            return;
         }
 
         return execSync(cmd, {
