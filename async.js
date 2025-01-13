@@ -128,6 +128,33 @@ const getTimeStr = () => {
     return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}:${String(t.getSeconds()).padStart(2, '0')}`;
 }
 
+/**
+ * Safe method to recursively delete empty directories
+ */
+const deleteEmptyFoldersRecursively = (folder) => {
+    const isDir = fs.statSync(folder).isDirectory();
+
+    if (!isDir) {
+        return;
+    }
+
+    let files = fs.readdirSync(folder).filter((file) => file !== '.DS_Store');
+
+    if (files.length) {
+        files.forEach((file) => {
+            const fullPath = path.join(folder, file);
+            deleteEmptyFoldersRecursively(fullPath);
+        });
+
+        files = fs.readdirSync(folder).filter((file) => file !== '.DS_Store');
+    }
+
+    if (!files.length) {
+        // console.log(`Deleting empty dir: ${folder}`);
+        fs.rmSync(folder, { recursive: true });
+    }
+}
+
 module.exports = async (config = {}) => {
     const startTime = performance.now();
 
@@ -1258,6 +1285,23 @@ module.exports = async (config = {}) => {
                     browserStackObservabilityURL = bsoUploadMessage.substring(bsoUploadMessage.indexOf('https://'));
                 }
 
+                fs.writeFileSync(
+                    path.resolve(defaultAllureReportDir, 'browserstack_test_observability_report.html'),
+                    `<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>BrowserStack Test Observability report</title>
+    <meta http-equiv="refresh" content="0; url=${browserStackObservabilityURL}">
+</head>
+
+<body>
+    <p>Redirecting...</p>
+</body>
+
+</html>`
+                );
+
                 console.log(`\n\nUploaded JUnit report to ${endpoint}\n`);
             } catch (err) {
                 console.error(red(`ERROR: JUnit report failed to upload to ${endpoint}:`), err);
@@ -1614,6 +1658,8 @@ module.exports = async (config = {}) => {
             }
         }
     }
+
+    deleteEmptyFoldersRecursively(reportDir);
 
     if (fullConfig.waitForFileExist?.deleteAfterCompletion) {
         if (fs.existsSync(waitForFileExistFilepath)) {
