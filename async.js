@@ -169,6 +169,9 @@ module.exports = async (config = {}) => {
 
     const threadInactivityTimeout = fullConfig.threadInactivityTimeout ?? 60 * 10;
     const threadTimeLimit = fullConfig.threadTimeLimit ?? 60 * 30;
+    const maxAllowedTimeouts = fullConfig.maxAllowedTimeouts ?? 4;
+
+    let threadTimeoutCount = 0;
 
     const clean = fullConfig.clean;
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
@@ -576,7 +579,7 @@ module.exports = async (config = {}) => {
 
         let restartTests = false;
 
-        if (phaseLock && phaseLock < threadsMeta[threadNo].phaseNo) {//hack this is daft but it works. Prevent thread from running if a thread from a previous phase has already failed
+        if (phaseLock && phaseLock < threadsMeta[threadNo].phaseNo || (threadTimeoutCount > maxAllowedTimeouts)) {//hack this is daft but it works. Prevent thread from running if a thread from a previous phase has already failed
             threadsMeta[threadNo].killFunc();
             return;
         }
@@ -614,13 +617,17 @@ module.exports = async (config = {}) => {
             if (!threadTimeLimit || threadsMeta[threadNo].threadTimeLimitTimer) return;
 
             threadsMeta[threadNo].threadTimeLimitTimer = setTimeout(() => {
-                customWarning(threadNo, `CRITICAL ERROR: The Cypress instance in thread #${threadNo} has failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}. It will now stop running immediately.`);
-
                 threadsMeta[threadNo].status = 'error';
                 threadsMeta[threadNo].errorType = 'timeout';
                 exitCode = 1;
-
                 restartTests = false;
+                threadTimeoutCount++;
+
+                if (threadTimeoutCount > maxAllowedTimeouts) {
+                    customWarning(threadNo, `CRITICAL ERROR: The Cypress instance in thread #${threadNo} has failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}. ${threadTimeoutCount} thread${threadTimeoutCount === 1 ? ' has' : 's have'} timed out, and the maximum number of threads allowed to time out is ${maxAllowedTimeouts}, so all threads will stop running.`);
+                } else {
+                    customWarning(threadNo, `CRITICAL ERROR: The Cypress instance in thread #${threadNo} has failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}. It will now stop running immediately. All threads will stop running if ${(maxAllowedTimeouts + 1) - threadTimeoutCount} more thread${((maxAllowedTimeouts + 1) - threadTimeoutCount) === 1 ? ' times out' : 's time out'}!`);
+                }
 
                 threadsMeta[threadNo].killFunc();
             }, threadTimeLimit * 1000);
@@ -714,7 +721,25 @@ module.exports = async (config = {}) => {
             clearTimeout(threadsMeta[threadNo].threadTimeLimitTimer);
             printAllLogs();
 
-            if (!threadsMeta[threadNo].logs.includes('All specs passed') || forceFail) {
+            if (threadTimeoutCount > maxAllowedTimeouts) {
+                threadsMeta[threadNo].status = 'error';
+
+                if (!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock) {
+                    phaseLock = threadsMeta[threadNo].phaseNo;
+                }
+
+                Object.values(threadsMeta).forEach((thread) => {
+                    if (!threadsMeta[thread.threadNo].logs.includes('All specs passed')) {
+                        threadsMeta[thread.threadNo].status = 'error';
+                        threadsMeta[thread.threadNo].errorType = 'critical';
+                        threadsMeta[thread.threadNo].perfResults.secs = undefined;
+                        threadsMeta[thread.threadNo].perfResults.startTime = undefined;
+                        clearTimeout(threadsMeta[thread.threadNo].threadTimeLimitTimer);//todo move into killfunc
+                    }
+
+                    threadsMeta[thread.threadNo].killFunc();
+                });
+            } else if (!threadsMeta[threadNo].logs.includes('All specs passed') || forceFail) {
                 threadsMeta[threadNo].status = 'error';
 
                 if (
@@ -734,6 +759,7 @@ module.exports = async (config = {}) => {
                                 threadsMeta[thread.threadNo].errorType = 'critical';
                                 threadsMeta[thread.threadNo].perfResults.secs = undefined;
                                 threadsMeta[thread.threadNo].perfResults.startTime = undefined;
+                                clearTimeout(threadsMeta[thread.threadNo].threadTimeLimitTimer);//todo move into killfunc
                             }
 
                             threadsMeta[thread.threadNo].killFunc();
@@ -1405,8 +1431,12 @@ module.exports = async (config = {}) => {
                         ${printHeaderMsg((() => {
                 let str = 'Be advised! This Allure report doesn\'t tell the full story.'
 
-                if (phaseLock) {
-                    str += `One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>`
+                if (threadTimeoutCount > maxAllowedTimeouts) {
+                    str += ` ${threadTimeoutCount} thread${threadTimeoutCount === 1 ? '' : 's'} timed out, which is more than the allowed limit. When this limit was surpassed, all incomplete threads stopped running immediately.<br><br>`
+                }
+
+                if (phaseLock < fullConfig.phases.length) {
+                    str += ` One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>`
                 }
 
                 if (criticalErrorThreads.length) {
