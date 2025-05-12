@@ -22,4 +22,3 @@ fi
 echo Thread \#"$threadNo" has completed.
 
 echo "<FALLBACK_SHELL_EXIT>"
-

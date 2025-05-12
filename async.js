@@ -177,7 +177,6 @@ module.exports = async (config = {}) => {
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
     const logMode = fullConfig.logMode || 1;
     const allureReportHeading = fullConfig.allureReportHeading;
-    const threadMode = fullConfig.threadMode || 1;
     const orderThreadsByBenchmark = fullConfig.orderThreadsByBenchmark ?? true;
     const saveThreadBenchmark = fullConfig.saveThreadBenchmark ?? true;
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
@@ -278,7 +277,6 @@ module.exports = async (config = {}) => {
     });
 
     const benchmarkObj = filterObj({
-        threadMode,
         specFiles,
         onlyPhaseNo,
         startingPhaseNo,
@@ -348,19 +346,7 @@ module.exports = async (config = {}) => {
     }
 
     const cypressConfigPhasesUnsorted = phases.map(phase => {
-        const specs = (() => {
-            if (threadMode === 2 && !specFiles) {
-                const arr = getDirectories(phase.specsDir);
-
-                if (getFiles(phase.specsDir).length) {
-                    console.warn(orange(`WARNING: One or more files have been placed at the root of ${phase.specsDir}. All spec files must be in subdirectories, otherwise they will not get tested when run with threadMode 2:\n${getFiles(phase.specsDir).join('\n')}\n`));
-                }
-
-                return arr;
-            } else {
-                return getFilesRecursive(phase.specsDir);
-            }
-        })();
+        const specs = getFilesRecursive(phase.specsDir)
 
         return specs.map((spec) => {
             return {
@@ -1010,27 +996,6 @@ module.exports = async (config = {}) => {
             }
         });
 
-        if (saveThreadBenchmark) {
-            benchmarkObj.order = [...new Set(Object.values(threadsMeta).filter(thread => thread.perfResults.secs).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path))];
-
-            if (benchmarkObj.order.length < 2) {
-                console.log(orange('The thread benchmark will not be updated because two or more threads with different files are required to determine the optimal order!'));
-            } else if (Object.values(threadsMeta).length !== benchmarkObj.order.length) {
-                console.log(orange('The thread benchmark will not be updated because one or more phases did not complete!'));
-            } else {
-                if (JSON.stringify(savedThreadBenchmark[benchmarkId]) !== JSON.stringify(benchmarkObj)) {
-                    console.log(`Updating thread order:\n["${benchmarkObj.order.join('", "')}"]`);
-
-                    fs.writeFileSync(threadBenchmarkFilepath, `${JSON.stringify({
-                        ...savedThreadBenchmark,
-                        [benchmarkId]: benchmarkObj,
-                    }, null, 4)}\n`);
-                } else {
-                    console.log('The results of the thread benchmark are identical to the records already saved, so the thread order doesn\'t need changing!');
-                }
-            }
-        }
-
         // a visual representation of how each thread performed, to show where any bottlenecks lie
         const generateThreadBars = (timeOfLongestThread) => {
             let str = '';
@@ -1260,6 +1225,47 @@ module.exports = async (config = {}) => {
         }
     }
 
+    const criticalErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'critical').map(o => o[0]);
+    const timeoutErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'timeout').map(o => o[0]);
+
+    const minorErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').filter(o => !['critical', 'timeout'].includes(o[1].errorType)).map(o => o[0]);
+    const allErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').map(o => o[0]);
+    const warnThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'warn').map(o => o[0]);
+
+    const allErrorThreadPaths = allErrorThreads.map(threadNo => threadsMeta[threadNo].path);
+
+    benchmarkObj.note = fullConfig.benchmarkNote;
+    benchmarkObj.order = [...new Set(Object.values(threadsMeta).filter(thread => thread.perfResults.secs).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path))];
+    benchmarkObj.fails = allErrorThreadPaths;
+    benchmarkObj.timestamp = Date.now();
+
+    if (benchmarkObj.order.length < 2) {
+        if (saveThreadBenchmark) {
+            console.log(orange('The thread order in the benchmark file won\'t be updated because two or more threads with different files are required to determine the optimal order!'));
+        }
+
+        benchmarkObj.order = savedThreadBenchmark[benchmarkId].order;
+    } else if (phaseLock < fullConfig.phases.length) {
+        if (saveThreadBenchmark) {
+            console.log(orange('The thread order in the benchmark file won\'t be updated because one or more phases did not complete!'));
+        }
+
+        benchmarkObj.order = savedThreadBenchmark[benchmarkId].order;
+    }
+
+    if (saveThreadBenchmark) {
+        if (JSON.stringify(savedThreadBenchmark[benchmarkId].order) !== JSON.stringify(benchmarkObj.order)) {
+            console.log(`Updating thread order:\n["${benchmarkObj.order.join('", "')}"]`);
+        } else {
+            console.log('The results of the thread benchmark are identical to the records already saved; the thread order doesn\'t need changing!');
+        }
+
+        fs.writeFileSync(threadBenchmarkFilepath, `${JSON.stringify({
+            ...savedThreadBenchmark,
+            [benchmarkId]: benchmarkObj,
+        }, null, 4)}\n`);
+    }
+
     let browserStackObservabilityURL;
 
     if (fullConfig.jUnitReport?.enabled) {
@@ -1392,13 +1398,6 @@ module.exports = async (config = {}) => {
                 </div>`;
             });
 
-            const criticalErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'critical').map(o => o[0]);
-            const timeoutErrorThreads = Object.entries(threadsMeta).filter(o => o[1].errorType === 'timeout').map(o => o[0]);
-
-            const minorErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').filter(o => !['critical', 'timeout'].includes(o[1].errorType)).map(o => o[0]);
-            const allErrorThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'error').map(o => o[0]);
-            const warnThreads = Object.entries(threadsMeta).filter(o => o[1].status === 'warn').map(o => o[0]);
-
             const status = (() => {
                 if (allErrorThreads.length) return 'error';
                 if (warnThreads.length) return 'warn';
@@ -1419,9 +1418,8 @@ module.exports = async (config = {}) => {
                 <div class="cmr-hidden">
                 <script type="application/json" id="cmr-run-config">${JSON.stringify({
                 browserStackObservabilityURL,
-                fails: allErrorThreads.map(threadNo => threadsMeta[threadNo].path),
-                fullConfig,
                 summary: threadSummary.summary,
+                ...benchmarkObj,
             }, null, 4)}</script>
                 </div>
                 <div class="cmr-content cmr-header">
