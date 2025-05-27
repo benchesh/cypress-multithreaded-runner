@@ -211,7 +211,7 @@ module.exports = async (config = {}) => {
         let files = null;
 
         try {
-            files = JSON.parse(parse(htmlStr).querySelector('#cmr-run-config').textContent).fails;
+            files = JSON.parse(parse(htmlStr).querySelector('#cmr-run-config').textContent.replace(/\n/g, '')).fails;
         } catch (err) {
             throw new Error(`Failed to parse the report URL "${fullConfig.runFailedSpecFilesFromReportURL}"`);
         }
