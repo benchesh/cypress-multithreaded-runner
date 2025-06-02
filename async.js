@@ -1239,31 +1239,43 @@ module.exports = async (config = {}) => {
     benchmarkObj.fails = allErrorThreadPaths;
     benchmarkObj.timestamp = Date.now();
 
+    let compareBenchmarks = true;
+
     if (benchmarkObj.order.length < 2) {
         if (saveThreadBenchmark) {
             console.log(orange('The thread order in the benchmark file won\'t be updated because two or more threads with different files are required to determine the optimal order!'));
         }
 
-        benchmarkObj.order = savedThreadBenchmark[benchmarkId].order;
+        if (savedThreadBenchmark[benchmarkId]?.order) {
+            benchmarkObj.order = savedThreadBenchmark[benchmarkId].order;
+            compareBenchmarks = false;
+        }
     } else if (phaseLock < fullConfig.phases.length) {
         if (saveThreadBenchmark) {
             console.log(orange('The thread order in the benchmark file won\'t be updated because one or more phases did not complete!'));
         }
 
-        benchmarkObj.order = savedThreadBenchmark[benchmarkId].order;
+        if (savedThreadBenchmark[benchmarkId]?.order) {
+            benchmarkObj.order = savedThreadBenchmark[benchmarkId].order;
+            compareBenchmarks = false;
+        }
     }
 
     if (saveThreadBenchmark) {
-        if (JSON.stringify(savedThreadBenchmark[benchmarkId].order) !== JSON.stringify(benchmarkObj.order)) {
-            console.log(`Updating thread order:\n["${benchmarkObj.order.join('", "')}"]`);
-        } else {
-            console.log('The results of the thread benchmark are identical to the records already saved; the thread order doesn\'t need changing!');
+        if (compareBenchmarks) {
+            if (JSON.stringify(savedThreadBenchmark[benchmarkId]?.order) !== JSON.stringify(benchmarkObj.order)) {
+                console.log(`Updating thread order:\n["${benchmarkObj.order.join('", "')}"]`);
+            } else {
+                console.log('The results of the thread benchmark are identical to the records already saved; the thread order doesn\'t need changing!');
+            }
         }
 
         fs.writeFileSync(threadBenchmarkFilepath, `${JSON.stringify({
             ...savedThreadBenchmark,
             [benchmarkId]: benchmarkObj,
         }, null, 4)}\n`);
+
+        console.log(`Benchmark file updated: ${threadBenchmarkFilepath}`);
     }
 
     let browserStackObservabilityURL;
