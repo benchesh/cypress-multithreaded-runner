@@ -1,6 +1,6 @@
 {
   "name": "cypress-multithreaded-runner",
-  "version": "1.21.0",
+  "version": "1.21.1",
   "description": "A lightweight method to run Cypress spec files in multiple threads, with built-in support for Allure report generation",
   "main": "index.js",
   "scripts": {
@@ -23,6 +23,6 @@
     "kill-sync": "^1.0.3",
     "node-html-parser": "^7.0.1",
     "node-notifier": "^10.0.1",
-    "yargs": "^17.7.2"
+    "yargs": "^18.0.0"
   }
 }
