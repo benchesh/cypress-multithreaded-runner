@@ -2,10 +2,10 @@
 
 cd "$1"
 
-if [[ $2 == true ]]; then
-    allure generate allure-results --clean -o allure-report &
-    allure generate allure-results --clean -o allure-report-temp --single-file
+if [[ $3 == true ]]; then
+    "$2" generate allure-results --clean -o allure-report &
+    "$2" generate allure-results --clean -o allure-report-temp --single-file
     wait
 else
-    allure generate allure-results --clean -o allure-report
+    "$2" generate allure-results --clean -o allure-report
 fi

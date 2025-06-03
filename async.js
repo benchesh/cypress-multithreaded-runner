@@ -1180,9 +1180,19 @@ module.exports = async (config = {}) => {
 
     // generate the Allure report from the most recent run
     async function allureGenerate() {
+        // TODO remove bug workaround; shouldn't need to reference exact filepath
+        // see https://github.com/allure-framework/allure-npm/issues/30
+        const allureExecFilepath = path.resolve(
+            path.dirname(require.resolve('allure-commandline')),
+            'dist',
+            'bin',
+            `allure${process.platform.startsWith('win') ? '.bat' : ''}`
+        );
+
         const testy = spawn('bash', [
             path.resolve(__dirname, 'shell', 'allure.sh'),
             reportDir,
+            allureExecFilepath,
             !!combineAllure,
         ]);
 
