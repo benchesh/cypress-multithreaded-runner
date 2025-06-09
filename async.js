@@ -543,14 +543,20 @@ module.exports = async (config = {}) => {
 
         threadsMeta[threadNo].fallbackCloseFunc = () => {
             threadsMeta[threadNo].fallbackCloseTimer = setTimeout(() => {
-                console.warn(`Fallback exit function on thread #${threadNo} (pid: ${cypressProcess.pid})`);
-
-                if (cypressProcess.pid) kill(cypressProcess.pid); // failsafe (might not be needed)
+                if (cypressProcess.pid) {
+                    console.warn(`Fallback exit function started on thread #${threadNo} (pid: ${cypressProcess.pid})`);
+                    kill(cypressProcess.pid); // failsafe (might not be needed)
+                } else {
+                    console.warn(`Fallback exit function started on thread #${threadNo}`);
+                }
 
                 // if thread has since been restarted since this fallback function was called, don't stop the thread!
                 if (retriesOnStart !== threadsMeta[threadNo].retries) {
+                    console.log(`Fallback exit cancelled; thread #${threadNo} has already restarted`);
                     return;
                 }
+
+                console.warn(`Fallback exit emitted on thread #${threadNo}`);
 
                 threadsMeta[threadNo].emitter.emit('exit');
             }, 5000);
@@ -558,7 +564,10 @@ module.exports = async (config = {}) => {
 
         threadsMeta[threadNo].killFunc = () => {
             threadsMeta[threadNo].fallbackCloseFunc();
-            if (cypressProcess.pid) kill(cypressProcess.pid);
+            if (cypressProcess.pid) {
+                console.warn(`Force stop thread #${threadNo} (pid: ${cypressProcess.pid})`);
+                kill(cypressProcess.pid);
+            }
         }
 
         if (!threadsMeta[threadNo].retries) noOfThreadsInUse++;
@@ -654,6 +663,7 @@ module.exports = async (config = {}) => {
                 || logLC.includes('cypress could not associate this error to any specific test.')
                 || logLC.includes('cypress: fatal io error')
                 || logLC.includes('webpack compilation error')
+                // || logLC.includes('this error occurred during a `before all`')
             ) {
                 restartTests = true;
 
