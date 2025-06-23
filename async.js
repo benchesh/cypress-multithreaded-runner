@@ -38,10 +38,10 @@ const writeFileSyncRecursive = (filepath, content = '') => {
     fs.writeFileSync(filepath, content, { flag: 'w' });
 };
 
-const getDirectories = (srcpath) => (
-    fs.existsSync(srcpath) ? fs.readdirSync(srcpath) : []
-).map((file) => path.join(srcpath, file))
-    .filter((filepath) => fs.statSync(filepath).isDirectory());
+// const getDirectories = (srcpath) => (
+//     fs.existsSync(srcpath) ? fs.readdirSync(srcpath) : []
+// ).map((file) => path.join(srcpath, file))
+//     .filter((filepath) => fs.statSync(filepath).isDirectory());
 
 const getFiles = (srcpath) => (
     fs.existsSync(srcpath) ? fs.readdirSync(srcpath) : []
@@ -181,6 +181,12 @@ module.exports = async (config = {}) => {
     const saveThreadBenchmark = fullConfig.saveThreadBenchmark ?? true;
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
     const benchmarkDescription = fullConfig.benchmarkDescription ?? null;
+
+    const verboseLog = (...log) => {
+        if (fullConfig.verbose) {
+            console.log(cyan(log.join(' ')));
+        }
+    }
 
     const specFiles = await (async () => {
         if (!fullConfig.runFailedSpecFilesFromReportURL) {
@@ -524,6 +530,23 @@ module.exports = async (config = {}) => {
     }
 
     async function spawnThread(threadNo, restartAttempts = 0, threadStarted = false) {
+        let restartTests = false;
+
+        if (threadsMeta[threadNo].pid) {// failsafe
+            kill(threadsMeta[threadNo].pid);
+            threadsMeta[threadNo].pid = false;
+        }
+
+        if (
+            threadsMeta[threadNo].errorType === 'timeout'
+            || (phaseLock && phaseLock < threadsMeta[threadNo].phaseNo)
+            || (threadTimeoutCount > maxAllowedTimeouts)
+        ) {//hack this is daft but it works. Prevent thread from running if a thread from a previous phase has already failed
+            verboseLog(`killFunc on thread #${threadNo} before spawn`)
+            threadsMeta[threadNo].killFunc();
+            return;
+        }
+
         const cypressProcess = spawn('bash', [
             path.resolve(__dirname, 'shell', 'cypress.sh'),
             // arguments for the shell script
@@ -541,11 +564,13 @@ module.exports = async (config = {}) => {
 
         const retriesOnStart = threadsMeta[threadNo].retries;
 
-        threadsMeta[threadNo].fallbackCloseFunc = () => {
-            threadsMeta[threadNo].fallbackCloseTimer = setTimeout(() => {
-                if (cypressProcess.pid) {
-                    console.warn(`Fallback exit function started on thread #${threadNo} (pid: ${cypressProcess.pid})`);
-                    kill(cypressProcess.pid); // failsafe (might not be needed)
+        threadsMeta[threadNo].fallbackCloseFunc = (bypassTimeout) => {
+            clearTimeout(threadsMeta[threadNo].fallbackCloseTimer);
+
+            const exitFunc = () => {
+                if (threadsMeta[threadNo].pid) {
+                    console.warn(`Fallback exit function started on thread #${threadNo} (pid: ${threadsMeta[threadNo].pid})`);
+                    kill(threadsMeta[threadNo].pid); // failsafe (might not be needed)
                 } else {
                     console.warn(`Fallback exit function started on thread #${threadNo}`);
                 }
@@ -557,27 +582,28 @@ module.exports = async (config = {}) => {
                 }
 
                 console.warn(`Fallback exit emitted on thread #${threadNo}`);
-
                 threadsMeta[threadNo].emitter.emit('exit');
+            }
+
+            if (bypassTimeout) {
+                exitFunc();
+                return;
+            }
+
+            threadsMeta[threadNo].fallbackCloseTimer = setTimeout(() => {
+                exitFunc();
             }, 5000);
         }
 
-        threadsMeta[threadNo].killFunc = () => {
-            threadsMeta[threadNo].fallbackCloseFunc();
-            if (cypressProcess.pid) {
-                console.warn(`Force stop thread #${threadNo} (pid: ${cypressProcess.pid})`);
-                kill(cypressProcess.pid);
+        threadsMeta[threadNo].killFunc = (bypassTimeout) => {
+            if (threadsMeta[threadNo].pid) {
+                threadsMeta[threadNo].fallbackCloseFunc(bypassTimeout);
+                console.warn(`Force stop thread #${threadNo} (pid: ${threadsMeta[threadNo].pid})`);
+                kill(threadsMeta[threadNo].pid);
             }
         }
 
         if (!threadsMeta[threadNo].retries) noOfThreadsInUse++;
-
-        let restartTests = false;
-
-        if (phaseLock && phaseLock < threadsMeta[threadNo].phaseNo || (threadTimeoutCount > maxAllowedTimeouts)) {//hack this is daft but it works. Prevent thread from running if a thread from a previous phase has already failed
-            threadsMeta[threadNo].killFunc();
-            return;
-        }
 
         if (noOfThreadsInUse > 1 && logMode < 3 && !threadsMeta[threadNo].printedLogs) {
             if (logMode === 1) {
@@ -601,6 +627,7 @@ module.exports = async (config = {}) => {
                 customWarning(threadNo, `The Cypress instance in thread #${threadNo} hasn\'t responded for ${secondsToNaturalString(threadInactivityTimeout)} and will be considered a crash.`);
 
                 restartTests = true;
+                verboseLog(`Thread #${threadNo} inactivity killFunc`)
 
                 threadsMeta[threadNo].killFunc();
             }, threadInactivityTimeout * 1000);
@@ -620,10 +647,27 @@ module.exports = async (config = {}) => {
 
                 if (threadTimeoutCount > maxAllowedTimeouts) {
                     customWarning(threadNo, `CRITICAL ERROR: The Cypress instance in thread #${threadNo} has failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}. ${threadTimeoutCount} thread${threadTimeoutCount === 1 ? ' has' : 's have'} timed out, and the maximum number of threads allowed to time out is ${maxAllowedTimeouts}, so all threads will stop running.`);
+
+                    threadsMeta[threadNo].status = 'error';
+
+                    if (!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock) {
+                        phaseLock = threadsMeta[threadNo].phaseNo;
+                    }
+
+                    Object.values(threadsMeta).forEach((thread) => {
+                        if (!threadsMeta[thread.threadNo].complete && threadsMeta[thread.threadNo].errorType !== 'timeout') {
+                            threadsMeta[thread.threadNo].status = 'error';
+                            threadsMeta[thread.threadNo].errorType = 'critical';
+                            threadsMeta[thread.threadNo].perfResults.secs = undefined;
+                            threadsMeta[thread.threadNo].perfResults.startTime = undefined;
+                            clearTimeout(threadsMeta[thread.threadNo].threadTimeLimitTimer);//todo move into killfunc
+                            threadsMeta[thread.threadNo].killFunc();
+                        }
+                    });
                 } else {
                     customWarning(threadNo, `CRITICAL ERROR: The Cypress instance in thread #${threadNo} has failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}. It will now stop running immediately. All threads will stop running if ${(maxAllowedTimeouts + 1) - threadTimeoutCount} more thread${((maxAllowedTimeouts + 1) - threadTimeoutCount) === 1 ? ' times out' : 's time out'}!`);
                 }
-
+                verboseLog(`Thread #${threadNo} timeout killFunc`)
                 threadsMeta[threadNo].killFunc();
             }, threadTimeLimit * 1000);
         };
@@ -663,18 +707,21 @@ module.exports = async (config = {}) => {
                 || logLC.includes('cypress could not associate this error to any specific test.')
                 || logLC.includes('cypress: fatal io error')
                 || logLC.includes('webpack compilation error')
-                // || logLC.includes('this error occurred during a `before all`')
+                || logLC.includes('this error occurred during a `before all`')
             ) {
                 restartTests = true;
+                verboseLog(`Internal Cypress error on thread #${threadNo}`, logLC);
 
                 threadsMeta[threadNo].killFunc();
             } else if (logLC.includes('no spec files were found')) {
                 threadsMeta[threadNo].status = 'error';
                 threadsMeta[threadNo].errorType = 'no-spec-files';
+                verboseLog(`No spec files detected on thread #${threadNo}`);
 
                 threadsMeta[threadNo].killFunc();
             } else if (!threadStarted && logLC.includes('(run starting)')) {
                 threadStarted = true;
+                verboseLog(`Detect run start on thread #${threadNo}`);
                 threadDelayTout.clearTimeout();
             }
         };
@@ -717,25 +764,8 @@ module.exports = async (config = {}) => {
             clearTimeout(threadsMeta[threadNo].threadTimeLimitTimer);
             printAllLogs();
 
-            if (threadTimeoutCount > maxAllowedTimeouts) {
-                threadsMeta[threadNo].status = 'error';
-
-                if (!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock) {
-                    phaseLock = threadsMeta[threadNo].phaseNo;
-                }
-
-                Object.values(threadsMeta).forEach((thread) => {
-                    if (!threadsMeta[thread.threadNo].logs.includes('All specs passed')) {
-                        threadsMeta[thread.threadNo].status = 'error';
-                        threadsMeta[thread.threadNo].errorType = 'critical';
-                        threadsMeta[thread.threadNo].perfResults.secs = undefined;
-                        threadsMeta[thread.threadNo].perfResults.startTime = undefined;
-                        clearTimeout(threadsMeta[thread.threadNo].threadTimeLimitTimer);//todo move into killfunc
-                    }
-
-                    threadsMeta[thread.threadNo].killFunc();
-                });
-            } else if (!threadsMeta[threadNo].logs.includes('All specs passed') || forceFail) {
+            if (threadTimeoutCount <= maxAllowedTimeouts
+                && (!threadsMeta[threadNo].logs.includes('All specs passed') || forceFail)) {
                 threadsMeta[threadNo].status = 'error';
 
                 if (
@@ -750,13 +780,14 @@ module.exports = async (config = {}) => {
                         customWarning(threadNo, `Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately. Any remaining threads from phase ${phaseLock} will continue running.`)
 
                         threadsFromPhasesAfterCurrent.forEach((thread) => {
-                            if (!threadsMeta[thread.threadNo].logs.includes('All specs passed')) {
+                            if (!threadsMeta[thread.threadNo].complete) {
                                 threadsMeta[thread.threadNo].status = 'error';
                                 threadsMeta[thread.threadNo].errorType = 'critical';
                                 threadsMeta[thread.threadNo].perfResults.secs = undefined;
                                 threadsMeta[thread.threadNo].perfResults.startTime = undefined;
                                 clearTimeout(threadsMeta[thread.threadNo].threadTimeLimitTimer);//todo move into killfunc
                             }
+                            verboseLog(`Thread #${thread.threadNo} is after phase ${phaseLock}: killFunc`)
 
                             threadsMeta[thread.threadNo].killFunc();
                         });
@@ -786,6 +817,7 @@ module.exports = async (config = {}) => {
                 clearTimeout(threadsMeta[threadNo].fallbackCloseTimer);
 
                 if (
+                    threadsMeta[threadNo].errorType !== 'timeout' &&
                     restartTests
                     || (
                         !threadsMeta[threadNo].errorType
@@ -864,7 +896,7 @@ module.exports = async (config = {}) => {
             if (noOfThreadsInUse < maxConcurrentThreads) {
                 resolve();
             }
-        }, ms));
+        }, ms > 0 ? ms : 0));
     }
 
     async function runCypressTests() {
@@ -874,7 +906,7 @@ module.exports = async (config = {}) => {
         if (Object.values(threadsMeta).length > 1) {
             if (waitForFileExistFilepath) {
                 // decrease total delay by .5s as waitForFileExist will check for the file in intervals of .5s
-                await delay(threadDelay - 500 > 0 ? threadDelay - 500 : 0);
+                await delay(threadDelay - 500);
 
                 await waitForFileExist();
             } else {
@@ -916,6 +948,10 @@ module.exports = async (config = {}) => {
     }
 
     await runCypressTests();
+
+    Object.values(threadsMeta).forEach(thread => {// failsafe; make sure all timeouts have stopped
+        thread.killFunc(true);
+    });
 
     if (logMode === 4) {
         Object.values(threadsMeta).forEach(thread => {
@@ -1041,21 +1077,21 @@ module.exports = async (config = {}) => {
                         threadsMeta[thread.threadNo].status = 'error';
                         threadsMeta[thread.threadNo].heading.push(err);
                         threadsMeta[thread.threadNo].summary = `ERROR: No spec files were found for thread #${threadId} [${shortThreadPath}]`;
-                        str += `${err}\n\n`;
+                        str += `${err}\n`;
                         exitCode = 1;
                         threadSummary.nospecs++;
                     } else if (threadsMeta[thread.threadNo].errorType === 'critical') {
                         const err = 'CRITICAL ERROR: Thread did not complete!';
                         threadsMeta[thread.threadNo].status = 'error';
                         threadsMeta[thread.threadNo].heading.push(err);
-                        str += `${err}\n\n`;
+                        str += `${err}\n`;
                         exitCode = 1;
                         threadSummary.criticals++;
                     } else if (threadsMeta[thread.threadNo].errorType === 'timeout') {
                         const err = `CRITICAL ERROR: Thread did not complete as it went over the time limit of ${secondsToNaturalString(threadTimeLimit)}`;
                         threadsMeta[thread.threadNo].status = 'error';
                         threadsMeta[thread.threadNo].heading.push(err);
-                        str += `${err}\n\n`;
+                        str += `${err}\n`;
                         exitCode = 1;
                         threadSummary.timeouts++;
                     }
@@ -1065,6 +1101,7 @@ module.exports = async (config = {}) => {
                     ) * 100;
 
                     if (isNaN(percentageOfTotal)) {
+                        str += '\n';
                         return;
                     }
 
@@ -1190,6 +1227,8 @@ module.exports = async (config = {}) => {
 
     // generate the Allure report from the most recent run
     async function allureGenerate() {
+        process.stdout.write('Generating report...');
+
         // TODO remove bug workaround; shouldn't need to reference exact filepath
         // see https://github.com/allure-framework/allure-npm/issues/30
         const allureExecFilepath = path.resolve(
@@ -1208,6 +1247,7 @@ module.exports = async (config = {}) => {
 
         return new Promise((resolve) => {
             testy.on('close', () => {
+                process.stdout.write(' done\n');
                 resolve();
             });
         });
