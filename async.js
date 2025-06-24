@@ -780,7 +780,7 @@ module.exports = async (config = {}) => {
                         customWarning(threadNo, `Thread #${threadNo} failed, and as it's from phase #${phaseLock}, all threads from following phases will be stopped immediately. Any remaining threads from phase ${phaseLock} will continue running.`)
 
                         threadsFromPhasesAfterCurrent.forEach((thread) => {
-                            if (!threadsMeta[thread.threadNo].complete) {
+                            if (!threadsMeta[thread.threadNo].complete && threadsMeta[thread.threadNo].errorType !== 'timeout') {
                                 threadsMeta[thread.threadNo].status = 'error';
                                 threadsMeta[thread.threadNo].errorType = 'critical';
                                 threadsMeta[thread.threadNo].perfResults.secs = undefined;
