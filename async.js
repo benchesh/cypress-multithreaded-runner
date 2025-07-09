@@ -157,6 +157,7 @@ const deleteEmptyFoldersRecursively = (folder) => {
 
 module.exports = async (config = {}) => {
     const startTime = performance.now();
+    const timestamp = Date.now();
 
     const fullConfig = getFullConfig(config);
 
@@ -181,6 +182,8 @@ module.exports = async (config = {}) => {
     const saveThreadBenchmark = fullConfig.saveThreadBenchmark ?? true;
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
     const benchmarkDescription = fullConfig.benchmarkDescription ?? null;
+
+    const customLogs = fullConfig.customLogs || [];
 
     const verboseLog = (...log) => {
         if (fullConfig.verbose) {
@@ -273,7 +276,13 @@ module.exports = async (config = {}) => {
                 const grepUntagged = phase.grepUntagged ? `grepUntagged="${phase.grepUntagged}"` : null;
                 const passthroughEnvArgs = phase.passthroughEnvArgs || null;
 
-                const arrStr = [grepTags, grep, grepUntagged, passthroughEnvArgs].filter(str => str).join(',');
+                const arrStr = [
+                    grepTags,
+                    grep,
+                    grepUntagged,
+                    `timestamp="${timestamp}"`,
+                    passthroughEnvArgs
+                ].filter(str => str).join(',');
 
                 if (!arrStr) return '';
 
@@ -1297,7 +1306,7 @@ module.exports = async (config = {}) => {
     benchmarkObj.note = fullConfig.benchmarkNote;
     benchmarkObj.order = [...new Set(Object.values(threadsMeta).filter(thread => thread.perfResults.secs).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path))];
     benchmarkObj.fails = allErrorThreadPaths;
-    benchmarkObj.timestamp = Date.now();
+    benchmarkObj.timestamp = timestamp;
 
     let compareBenchmarks = true;
 
@@ -1437,6 +1446,22 @@ module.exports = async (config = {}) => {
         }
     }
 
+    customLogs.forEach((customLog, index) => {
+        if (typeof customLog.generateContent === 'function') {
+            if (customLog.content) {
+                customLog.content += `\n\n${customLog.generateContent()}`;
+            } else {
+                customLog.content = customLog.generateContent();
+            }
+        }
+
+        if (!customLog.heading) {
+            customLog.heading = `Custom Logs ${index + 1}`;
+        }
+
+        console.log(`${customLog.heading}\n\n${customLog.content}`);
+    });
+
     if (generateAllure) {
         const defaultAllureReportHtml = path.resolve(defaultAllureReportDir, 'index.html');
         const defaultAllureReportHtmlComplete = path.resolve(defaultAllureReportDir, 'complete.html');
@@ -1447,6 +1472,18 @@ module.exports = async (config = {}) => {
         if (fs.existsSync(defaultAllureReportHtml)) {
             let allLogs = '';
 
+            customLogs.forEach((customLog) => {
+                allLogs += `<div class="cmr-thread cmr-custom">
+                    <span class="cmr-pre-heading cmr-sticky">
+                        <h2 id="cmr-arr-content">➡️</h2>
+                        <h2>${customLog.heading}</h2>
+                    </span>
+                    <div id="cmr-pre-content" style="display:none;overflow:auto;margin-top:20px;">
+                    <div class="cmr-thread-pre"><pre>${customLog.content}</pre></div>
+                    </div>
+                </div>`;
+            });
+
             Object.keys(threadsMeta).forEach((threadNo) => {
                 if (!threadsMeta[threadNo].logs) {
                     return;
@@ -1455,10 +1492,10 @@ module.exports = async (config = {}) => {
                 allLogs += `
                 <div class="cmr-thread cmr-${threadsMeta[threadNo].status}">
                     <span class="cmr-pre-heading cmr-sticky">
-                        <h2 id="cmr-arr-${threadNo}">➡️</h2>
+                        <h2 id="cmr-arr-content">➡️</h2>
                         <h2>${threadsMeta[threadNo].heading.join('<br>')}</h2>
                     </span>
-                    <div id="cmr-pre-${threadNo}" style="display:none;overflow:auto;margin-top:20px;">
+                    <div id="cmr-pre-content" style="display:none;overflow:auto;margin-top:20px;">
                     ${threadsMeta[threadNo].logsTimestamped.map(logs => {
                     return `<div class="cmr-thread-pre">
                         <pre>${logs[0]}</pre>
@@ -1620,6 +1657,10 @@ module.exports = async (config = {}) => {
                         background: #97cc64;
                     }
 
+                    .cmr-content div.cmr-custom {
+                        background:rgb(88, 169, 250);
+                    }
+
                     .cmr-content div.cmr-notes {
                         background: #aaa;
                     }
@@ -1647,13 +1688,13 @@ module.exports = async (config = {}) => {
                     </style>
                     <script>
                     [...document.querySelectorAll('.cmr-pre-heading')].forEach((heading, index) => {
-                        const thisIndex = index + 1;
+                        const thisIndex = index;
                 
                         heading.addEventListener('click', () => {
                         heading.classList.toggle('cmr-pre-heading-active');
 
-                        const thisPre = document.querySelector('#cmr-pre-' + thisIndex);
-                        const thisArr = document.querySelector('#cmr-arr-' + thisIndex);
+                        const thisPre = document.querySelectorAll('#cmr-pre-content')[thisIndex];
+                        const thisArr = document.querySelectorAll('#cmr-arr-content')[thisIndex];
                 
                         if (thisPre.style.display === 'none') {
                             thisPre.style.removeProperty('display');
