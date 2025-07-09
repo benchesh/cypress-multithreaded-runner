@@ -1690,19 +1690,24 @@ module.exports = async (config = {}) => {
                     [...document.querySelectorAll('.cmr-pre-heading')].forEach((heading, index) => {
                         const thisIndex = index;
                 
-                        heading.addEventListener('click', () => {
-                        heading.classList.toggle('cmr-pre-heading-active');
+                        heading.addEventListener('click', (e) => {
+                          const topTarget=e.target.getBoundingClientRect().top;                            
+                          heading.classList.toggle('cmr-pre-heading-active');
 
-                        const thisPre = document.querySelectorAll('#cmr-pre-content')[thisIndex];
-                        const thisArr = document.querySelectorAll('#cmr-arr-content')[thisIndex];
-                
-                        if (thisPre.style.display === 'none') {
+                          const thisPre = document.querySelectorAll('#cmr-pre-content')[thisIndex];
+                          const thisArr = document.querySelectorAll('#cmr-arr-content')[thisIndex];
+                    
+                          if (thisPre.style.display === 'none') {
                             thisPre.style.removeProperty('display');
                             thisArr.innerHTML = '⬇️';
-                        } else {
+                          } else {
                             thisPre.style.display = 'none';
                             thisArr.innerHTML = '➡️';
-                        }
+
+                            window.scrollTo(0,0);
+                            const currentTop=e.target.getBoundingClientRect().top;
+                            window.scrollBy(0,currentTop-topTarget);
+                          }
                         });
                     });
 
