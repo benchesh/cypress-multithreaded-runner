@@ -260,7 +260,7 @@ module.exports = async (config = {}) => {
     const phases = fullConfig.phases.map(phase => {
         return {
             ...fullConfig.phaseDefaults,
-            ...phase,
+            ...phase
         }
     }).map(phase => {
         return {
@@ -287,7 +287,7 @@ module.exports = async (config = {}) => {
                 if (!arrStr) return '';
 
                 return `,${arrStr}`
-            })(),
+            })()
         }
     });
 
@@ -302,9 +302,9 @@ module.exports = async (config = {}) => {
                 specsDir: phase.specsDir,
                 onlyRunSpecFilesIncludingAnyText: phase.onlyRunSpecFilesIncludingAnyText,
                 onlyRunSpecFilesIncludingAllText: phase.onlyRunSpecFilesIncludingAllText,
-                additionalCypressEnvArgs: phase.additionalCypressEnvArgs,
+                additionalCypressEnvArgs: phase.additionalCypressEnvArgs
             })
-        }),
+        })
     });
 
     const benchmarkId = benchmarkDescription || btoa(JSON.stringify(benchmarkObj));
@@ -336,11 +336,16 @@ module.exports = async (config = {}) => {
         }
 
         return execSync(cmd, {
-            cwd,
+            cwd
         });
     };
 
-    let thread2ExtraLog = '';
+    try {
+        runShellCommand('java -version')
+    } catch (err) {
+        console.error(red('CRITICAL ERROR: Java is not installed or not in the PATH. Java is currently required to generate the Allure report.\nhttps://www.java.com/en/download/'));
+        process.exit(1);
+    }
 
     let exitCode = 0;
 
@@ -350,7 +355,7 @@ module.exports = async (config = {}) => {
                 {
                     title: 'Cypress Multithreaded Runner',
                     message,
-                    sound: true,
+                    sound: true
                 },
             );
         }
@@ -1251,8 +1256,11 @@ module.exports = async (config = {}) => {
             path.resolve(__dirname, 'shell', 'allure.sh'),
             reportDir,
             allureExecFilepath,
-            !!combineAllure,
+            !!combineAllure
         ]);
+
+        testy.stdout.on('data', (data) => verboseLog(data.toString()));
+        testy.stderr.on('data', (data) => console.log(data.toString()));
 
         return new Promise((resolve) => {
             testy.on('close', () => {
@@ -1341,7 +1349,7 @@ module.exports = async (config = {}) => {
 
         fs.writeFileSync(threadBenchmarkFilepath, `${JSON.stringify({
             ...savedThreadBenchmark,
-            [benchmarkId]: benchmarkObj,
+            [benchmarkId]: benchmarkObj
         }, null, 4)}\n`);
 
         console.log(`Benchmark file updated: ${threadBenchmarkFilepath}`);
@@ -1528,7 +1536,7 @@ module.exports = async (config = {}) => {
                 <script type="application/json" id="cmr-run-config">${JSON.stringify({
                 browserStackObservabilityURL,
                 summary: threadSummary.summary,
-                ...benchmarkObj,
+                ...benchmarkObj
             }, null, 4)}</script>
                 </div>
                 <div class="cmr-content cmr-header">

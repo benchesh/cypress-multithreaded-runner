@@ -8,7 +8,7 @@ NOTE: Currently, generating the Allure report is needed in order for this module
 
 ## Prerequisites
 
-- [node 18 or above](https://nodejs.org/en/download)
+- [node 20 or above](https://nodejs.org/en/download)
 - [Java](https://www.java.com/en/download/)
 - A [Cypress](https://www.npmjs.com/package/cypress) project (tested on versions `12.10` and `13.7`)
 - [@cypress/grep](https://www.npmjs.com/package/@cypress/grep) (optional: only needed if you want to use Cypress grep features)
