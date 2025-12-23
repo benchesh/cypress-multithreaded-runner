@@ -183,7 +183,7 @@ module.exports = async (config = {}) => {
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
     const benchmarkDescription = fullConfig.benchmarkDescription ?? null;
 
-    const customLogs = fullConfig.customLogs || [];
+    const customLogs = Array.isArray(fullConfig.customLogs) ? fullConfig.customLogs : [];
 
     const verboseLog = (...log) => {
         if (fullConfig.verbose) {
@@ -1454,21 +1454,35 @@ module.exports = async (config = {}) => {
         }
     }
 
-    customLogs.forEach((customLog, index) => {
-        if (typeof customLog.generateContent === 'function') {
-            if (customLog.content) {
-                customLog.content += `\n\n${customLog.generateContent()}`;
-            } else {
-                customLog.content = customLog.generateContent();
+    try {
+        customLogs.forEach((customLog, index) => {
+            if (typeof customLog.generateContent === 'function') {
+                try {
+                    if (customLog.content) {
+                        customLog.content += `\n\n${customLog.generateContent()}`;
+                    } else {
+                        customLog.content = customLog.generateContent();
+                    }
+                } catch (e) {
+                    const errMsg = `ERROR: Failed to generate customLogs[${index}] content; please check the generateContent function: ${e.message}`;
+                    
+                    if (customLog.content) {
+                        customLog.content += `\n\n${errMsg}`;
+                    } else {
+                        customLog.content = errMsg;
+                    }
+                }
             }
-        }
 
-        if (!customLog.heading) {
-            customLog.heading = `Custom Logs ${index + 1}`;
-        }
+            if (!customLog.heading) {
+                customLog.heading = `Custom Logs ${index + 1}`;
+            }
 
-        console.log(`${customLog.heading}\n\n${customLog.content}`);
-    });
+            console.log(`${customLog.heading}\n\n${customLog.content}`);
+        });
+    } catch (e) {
+        console.error(red(`ERROR: A critical error occurred when processing the customLogs object, so they may not be displayed properly: ${e.message}`));
+    }
 
     if (generateAllure) {
         const defaultAllureReportHtml = path.resolve(defaultAllureReportDir, 'index.html');
@@ -1480,8 +1494,9 @@ module.exports = async (config = {}) => {
         if (fs.existsSync(defaultAllureReportHtml)) {
             let allLogs = '';
 
-            customLogs.forEach((customLog) => {
-                allLogs += `<div class="cmr-thread cmr-custom">
+            try {
+                customLogs.forEach((customLog) => {
+                    allLogs += `<div class="cmr-thread cmr-custom">
                     <span class="cmr-pre-heading cmr-sticky">
                         <h2 id="cmr-arr-content">➡️</h2>
                         <h2>${customLog.heading}</h2>
@@ -1490,7 +1505,18 @@ module.exports = async (config = {}) => {
                     <div class="cmr-thread-pre"><pre>${customLog.content}</pre></div>
                     </div>
                 </div>`;
-            });
+                });
+            } catch (e) {
+                allLogs += `<div class="cmr-thread cmr-custom">
+                    <span class="cmr-pre-heading cmr-sticky">
+                        <h2 id="cmr-arr-content">➡️</h2>
+                        <h2>Custom Logs</h2>
+                    </span>
+                    <div id="cmr-pre-content" style="display:none;overflow:auto;margin-top:20px;">
+                    <div class="cmr-thread-pre"><pre>A critical error occurred when processing the customLogs object, so they can't be displayed: ${e.message}</pre></div>
+                    </div>
+                </div>`;
+            }
 
             Object.keys(threadsMeta).forEach((threadNo) => {
                 if (!threadsMeta[threadNo].logs) {
