@@ -851,6 +851,11 @@ module.exports = async (config = {}) => {
                             fs.rmSync(path.join(allureResultsPath, String(threadNo)), { recursive: true, force: true });
                         }
 
+                        // TODO: Fallback needed until this bug is fixed: https://github.com/mmisty/cypress-allure-adapter/issues/268
+                        if (fs.pathExistsSync(path.join(allureResultsPath, `${String(threadNo)}_fallback`))) {
+                            fs.rmSync(path.join(allureResultsPath, `${String(threadNo)}_fallback`), { recursive: true, force: true });
+                        }
+
                         await spawnThread(threadNo, restartAttempts, threadStarted);
                     } else {
                         threadsMeta[threadNo].status = 'error';
@@ -999,9 +1004,13 @@ module.exports = async (config = {}) => {
 
             let verifiedThread = false;
 
+            // TODO: Fallback needed until this bug is fixed: https://github.com/mmisty/cypress-allure-adapter/issues/268
+            const useFallbackReport = fs.existsSync(path.join(allureResultsPath, `${String(thread.threadNo)}_fallback`)) && !getFiles(path.join(allureResultsPath, String(thread.threadNo))).length
+
             // record how many tests failed, and how many times!
             getFiles(
-                path.join(allureResultsPath, String(thread.threadNo)),
+                useFallbackReport ? path.join(allureResultsPath, `${String(thread.threadNo)}_fallback`)
+                    : path.join(allureResultsPath, String(thread.threadNo)),
             ).forEach((file) => {
                 if (file.endsWith('.json')) {
                     try {// try catch as not all JSON files will be parseable
@@ -1132,7 +1141,7 @@ module.exports = async (config = {}) => {
                             }, {});
 
                             Object.keys(counts).sort((a, b) => b - a).forEach((num) => {
-                                result.push(`${counts[num]} test${counts[num] > 1 ? 's' : ''} failed ${num} time${num > 1 ? 's' : ''}`);
+                                result.push(`${counts[num]} test${counts[num] > 1 ? 's' : ''} failed at least ${num} time${num > 1 ? 's' : ''}`);
 
                                 if (threadSummary.fails[num]) {
                                     threadSummary.fails[num] += counts[num];
@@ -1196,7 +1205,7 @@ module.exports = async (config = {}) => {
             });
 
             Object.entries(threadSummary.fails).reverse().forEach((prop) => {
-                threadSummary.failSummary.push(`${prop[1]} test${prop[1] === 1 ? '' : 's'} failed ${prop[0]} time${Number(prop[0]) === 1 ? '' : 's'}`);
+                threadSummary.failSummary.push(`${prop[1]} test${prop[1] === 1 ? '' : 's'} failed at least ${prop[0]} time${Number(prop[0]) === 1 ? '' : 's'}`);
             });
 
             const summary = [
@@ -1229,12 +1238,30 @@ module.exports = async (config = {}) => {
         try {// try catch as not all JSON files will be parseable
             const data = fs.readJsonSync(file);
 
-            const { labels, fullName } = data;
+            const { labels, fullName, status } = data;
 
             if (data.historyId && labels.length) {
                 data.historyId = Buffer.from(JSON.stringify(labels.concat(fullName))).toString('base64');
 
-                fs.writeFileSync(file, JSON.stringify(data));
+                // Workaround for a bug whereby a test may display as failed if the timestamps are identical to the run that passed
+                switch (status) {
+                    case 'passed':
+                        data.start += 3;
+                        data.stop += 3;
+                        break;
+                    case 'failed':
+                        data.start += 2;
+                        data.stop += 2;
+                        break;
+                    case 'broken':
+                        data.start += 1;
+                        data.stop += 1;
+                        break;
+                    default:
+                        break;
+                }
+
+                fs.writeFileSync(file, JSON.stringify(data, null, 4));
             }
         } catch (err) { }
     });
@@ -1465,7 +1492,7 @@ module.exports = async (config = {}) => {
                     }
                 } catch (e) {
                     const errMsg = `ERROR: Failed to generate customLogs[${index}] content; please check the generateContent function: ${e.message}`;
-                    
+
                     if (customLog.content) {
                         customLog.content += `\n\n${errMsg}`;
                     } else {

@@ -1,6 +1,6 @@
 {
   "name": "cypress-multithreaded-runner",
-  "version": "1.24.1",
+  "version": "1.25.1",
   "description": "A lightweight method to run Cypress spec files in multiple threads, with built-in support for Allure report generation",
   "main": "index.js",
   "scripts": {
@@ -19,10 +19,11 @@
     "url": "git+https://github.com/benchesh/cypress-multithreaded-runner.git"
   },
   "dependencies": {
-    "@mmisty/cypress-allure-adapter": "^3.3.2",
-    "allure-commandline": "^2.34.1",
-    "fs-extra": "^11.3.2",
-    "junit-report-merger": "^8.0.0",
+    "@mmisty/cypress-allure-adapter": "^4.0.1",
+    "allure-commandline": "^2.36.0",
+    "allure-cypress": "^3.4.3",
+    "fs-extra": "^11.3.3",
+    "junit-report-merger": "^9.0.3",
     "kill-sync": "^1.0.3",
     "node-html-parser": "^7.0.1",
     "node-notifier": "^10.0.1",

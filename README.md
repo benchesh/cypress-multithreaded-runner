@@ -80,9 +80,9 @@ module.exports = defineConfig({
 });
 ```
 
-The imports above are simple wrappers for [@mmisty/cypress-allure-adapter](https://www.npmjs.com/package/@mmisty/cypress-allure-adapter), so refer to that module's readme should you wish to customise the plugin's behaviour.
+If this code is missing, you may find that an empty Allure report is generated after running tests.
 
-If either of the imports are missing, you may find that an empty Allure report is generated after running tests.
+Under the hood this will import both [@mmisty/cypress-allure-adapter](https://www.npmjs.com/package/@mmisty/cypress-allure-adapter) and [allure-cypress](https://www.npmjs.com/package/allure-cypress). The former dependency provides a more comprehensive report, but is less compatible than the latter (for example, it may not work with [WebKit](https://github.com/mmisty/cypress-allure-adapter/issues/268)). Should the former not produce any Allure results for a given thread, results from the latter will be used instead.
 
 ### Optional: Grep
 
