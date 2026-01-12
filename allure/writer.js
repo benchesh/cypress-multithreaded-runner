@@ -5,8 +5,9 @@ const allureCypress = require('@mmisty/cypress-allure-adapter/plugins').configur
 const { allureCypress: allureCypressFallback } = require('allure-cypress/reporter');
 
 module.exports = (on, config, allureConfig) => {
-  allureCypressFallback(on, config, {
-    ...allureConfig,
-    resultsDir: `${config.env.allureResults}_fallback`,
-  }) && allureCypress(on, config)
+  allureCypress(on, config, allureConfig)
+    && allureCypressFallback(on, config, {
+      ...allureConfig,
+      resultsDir: `${config.env.allureResults}_fallback`,
+    });
 };
