@@ -183,6 +183,8 @@ module.exports = async (config = {}) => {
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
     const benchmarkDescription = fullConfig.benchmarkDescription ?? null;
 
+    const stopSubsequentPhasesOnFail = fullConfig.stopSubsequentPhasesOnFail ?? true;
+
     const customLogs = Array.isArray(fullConfig.customLogs) ? fullConfig.customLogs : [];
 
     const verboseLog = (...log) => {
@@ -505,7 +507,11 @@ module.exports = async (config = {}) => {
     initLogs.unshift(`${Object.values(threadsMeta).length} thread${Object.values(threadsMeta).length !== 1 ? 's' : ''} will be created to test the following spec files in the following order:`)
 
     if (cypressConfigPhasesSorted.length > 1) {
-        initLogs.push('Should tests in any phase fail, all threads from subsequent phases will stop immediately.');
+        if (stopSubsequentPhasesOnFail) {
+            initLogs.push('Should tests in any phase fail, all threads from subsequent phases will stop immediately.');
+        } else {
+            initLogs.push('Should tests in any phase fail, threads from subsequent phases will continue to run as stopSubsequentPhasesOnFail is set to false.');
+        }
     }
 
     initLogs.push(`A maximum of ${Object.values(threadsMeta).length < maxConcurrentThreads ? Object.values(threadsMeta).length : maxConcurrentThreads} threads will be used at any one time.\nThis code is executing on a machine with ${require('os').cpus().length} logical CPU threads.`);
@@ -664,7 +670,7 @@ module.exports = async (config = {}) => {
 
                     threadsMeta[threadNo].status = 'error';
 
-                    if (!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock) {
+                    if ((!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock) && stopSubsequentPhasesOnFail) {
                         phaseLock = threadsMeta[threadNo].phaseNo;
                     }
 
@@ -785,6 +791,7 @@ module.exports = async (config = {}) => {
                 if (
                     (!phaseLock || threadsMeta[threadNo].phaseNo < phaseLock)
                     && threadsMeta[threadNo].phaseNo < Object.keys(cypressConfigPhasesSorted).length
+                    && stopSubsequentPhasesOnFail
                 ) {
                     phaseLock = threadsMeta[threadNo].phaseNo;
 
@@ -1354,7 +1361,7 @@ module.exports = async (config = {}) => {
             benchmarkObj.order = savedThreadBenchmark[benchmarkId].order;
             compareBenchmarks = false;
         }
-    } else if (phaseLock < fullConfig.phases.length) {
+    } else if (phaseLock && phaseLock < fullConfig.phases.length) {
         if (saveThreadBenchmark) {
             console.log(orange('The thread order in the benchmark file won\'t be updated because one or more phases did not complete!'));
         }
@@ -1603,7 +1610,7 @@ module.exports = async (config = {}) => {
                     str += ` ${threadTimeoutCount} thread${threadTimeoutCount === 1 ? '' : 's'} timed out, which is more than the allowed limit. When this limit was surpassed, all incomplete threads stopped running immediately.<br><br>`
                 }
 
-                if (phaseLock < fullConfig.phases.length) {
+                if (phaseLock && phaseLock < fullConfig.phases.length) {
                     str += ` One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>`
                 }
 
