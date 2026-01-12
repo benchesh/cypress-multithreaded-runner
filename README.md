@@ -84,6 +84,8 @@ If this code is missing, you may find that an empty Allure report is generated a
 
 Under the hood this will import both [@mmisty/cypress-allure-adapter](https://www.npmjs.com/package/@mmisty/cypress-allure-adapter) and [allure-cypress](https://www.npmjs.com/package/allure-cypress). The former dependency provides a more comprehensive report, but is less compatible than the latter (for example, it may not work with [WebKit](https://github.com/mmisty/cypress-allure-adapter/issues/268)). Should the former not produce any Allure results for a given thread, results from the latter will be used instead.
 
+This is a little bit hacky. If you experience issues, you can import just the first of these dependencies by using `cypress-multithreaded-runner/allure_nofallback` and `cypress-multithreaded-runner/allure/writer_nofallback` or import a different Allure generator.
+
 ### Optional: Grep
 
 If you want to make use of [@cypress/grep](https://www.npmjs.com/package/@cypress/grep), add it as a dependency to your project and follow the [official readme](https://github.com/cypress-io/cypress/tree/develop/npm/grep#readme) to see how to import it. Refer to the [options table](#options) to see what features are supported by cypress-multithreaded-runner out of the box.
@@ -306,3 +308,9 @@ The module makes use of `argv` to allow options to be overriden via the command 
 | --------------------------- | --------------- | ------------- | ----------------------------------------------------------------------- |
 | `maxConcurrentThreadsArray` | arrayOf(number) | null          | An array of values you wish to set & compare for `maxConcurrentThreads` |
 | `repeat`                    | number          | 3             | The number of times to repeat each experiment                           |
+
+## Known issues
+
+| Issue                                   | Solution                                                                                                                                                                         |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tests crash when Cypress records videos | Either reduce the number of concurrent threads (ie `--max-concurrent-threads 1`) or import the Allure generator without the fallback (see [here](#generating-the-allure-report)) |

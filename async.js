@@ -724,7 +724,7 @@ module.exports = async (config = {}) => {
                 || logLC.includes('this error occurred during a `before all`')
             ) {
                 restartTests = true;
-                verboseLog(`Internal Cypress error on thread #${threadNo}`, logLC);
+                verboseLog(`Internal Cypress error in thread #${threadNo}`, logLC);
 
                 threadsMeta[threadNo].killFunc();
             } else if (logLC.includes('no spec files were found')) {
