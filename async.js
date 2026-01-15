@@ -194,43 +194,90 @@ module.exports = async (config = {}) => {
     }
 
     const specFiles = await (async () => {
-        if (!fullConfig.runFailedSpecFilesFromReportURL) {
+        if (!fullConfig.runFailedSpecFilesFromReportURL && !fullConfig.runMostRecentlyFailedSpecFilesFromReportsDir) {
             return fullConfig.specFiles ?? null;
         }
 
-        let htmlStr = '';
-
-        async function curlFile() {
-            const testy = spawn('bash', [
-                path.resolve(__dirname, 'shell', 'curl.sh'),
-                fullConfig.runFailedSpecFilesFromReportURL
-            ]);
-
-            testy.stdout.on('data', (data) => htmlStr += `${data.toString()}\n`);
-
-            return new Promise((resolve) => {
-                testy.on('close', () => {
-                    resolve();
-                });
-            });
-        }
-
-        await curlFile();
+        console.log('');
 
         const { parse } = require('node-html-parser');
 
-        let files = null;
+        const findFailedSpecFilesFromHTML = (htmlStr, path) => {
+            try {
+                const { fails } = JSON.parse(parse(htmlStr).querySelector('#cmr-run-config').textContent.replace(/\n/g, ''));
 
-        try {
-            files = JSON.parse(parse(htmlStr).querySelector('#cmr-run-config').textContent.replace(/\n/g, '')).fails;
-        } catch (err) {
-            throw new Error(`Failed to parse the report URL "${fullConfig.runFailedSpecFilesFromReportURL}"`);
+                const str = `${fails.length} failed spec file${fails.length === 1 ? '' : 's'} ${fails.length === 1 ? 'was' : 'were'} found in the report "${path}"${fails.length ? `:\n${fails.join('\n')}\n` : ''}`;
+
+                console.log(fails.length ? green(str) : str);
+
+                return fails;
+            } catch (err) {
+                console.error(`Failed to parse the file "${path}"`);
+                return false;
+            }
         }
 
-        if (!files.length) {
-            throw new Error(`No failed spec files were found in the report URL "${fullConfig.runFailedSpecFilesFromReportURL}"`);
+        let files = null;
+
+        if (fullConfig.runMostRecentlyFailedSpecFilesFromReportsDir) {
+            const runMostRecentlyFailedSpecFilesFromReportsDir = path.resolve(fullConfig.runMostRecentlyFailedSpecFilesFromReportsDir);
+
+            if (!fs.existsSync(runMostRecentlyFailedSpecFilesFromReportsDir)) {
+                throw new Error(`Directory "${fullConfig.runMostRecentlyFailedSpecFilesFromReportsDir}" doesn\'t exist`);
+            }
+
+            const allHTMLFilesNewestToOldest = getFilesRecursive(runMostRecentlyFailedSpecFilesFromReportsDir)
+                .filter(file => file.endsWith('.html'))
+                .sort((a, b) => fs.statSync(b).mtime - fs.statSync(a).mtime);
+
+            if (!allHTMLFilesNewestToOldest.length) {
+                throw new Error(`No HTML files were found in "${fullConfig.runMostRecentlyFailedSpecFilesFromReportsDir}"`);
+            }
+
+            for (const file of allHTMLFilesNewestToOldest) {
+                let htmlStr = fs.readFileSync(file).toString();
+
+                files = findFailedSpecFilesFromHTML(htmlStr, file);
+
+                if (files?.length) {
+                    break;
+                }
+            }
+
+            if (!files?.length) {
+                throw new Error(`No failed spec files were found in any reports within "${fullConfig.runMostRecentlyFailedSpecFilesFromReportsDir}"`);
+            }
         } else {
-            console.log(`${files.length} failed spec file${files.length === 1 ? '' : 's'} were found in the report URL "${fullConfig.runFailedSpecFilesFromReportURL}":\n${files.join('\n')}\n`)
+            if (fs.existsSync(path.resolve(fullConfig.runFailedSpecFilesFromReportURL))) {
+                files = findFailedSpecFilesFromHTML(
+                    fs.readFileSync(path.resolve(fullConfig.runFailedSpecFilesFromReportURL)).toString(),
+                    fullConfig.runFailedSpecFilesFromReportURL
+                );
+            } else {
+                let htmlStr = '';
+
+                async function curlFile() {
+                    const testy = spawn('bash', [
+                        path.resolve(__dirname, 'shell', 'curl.sh'),
+                        fullConfig.runFailedSpecFilesFromReportURL
+                    ]);
+
+                    testy.stdout.on('data', (data) => htmlStr += `${data.toString()}\n`);
+
+                    return new Promise((resolve) => {
+                        testy.on('close', () => {
+                            resolve();
+                        });
+                    });
+                }
+
+                await curlFile(htmlStr);
+                files = findFailedSpecFilesFromHTML(htmlStr, fullConfig.runFailedSpecFilesFromReportURL)
+            }
+
+            if (!files.length) {
+                throw new Error(`No failed spec files were found in the report "${fullConfig.runFailedSpecFilesFromReportURL}"`);
+            }
         }
 
         return files;
@@ -367,8 +414,11 @@ module.exports = async (config = {}) => {
         console.warn(orange('WARNING: maxConcurrentThreadsExperiment will not work when run through the async mode'));
     }
 
+    let allSpecsInAllPhases = [];
+
     const cypressConfigPhasesUnsorted = phases.map(phase => {
-        const specs = getFilesRecursive(phase.specsDir)
+        const specs = getFilesRecursive(phase.specsDir);
+        allSpecsInAllPhases = allSpecsInAllPhases.concat(specs);
 
         return specs.map((spec) => {
             return {
@@ -394,6 +444,18 @@ module.exports = async (config = {}) => {
             }
         }).filter((thread) => thread.specPattern.length)
     }).filter((phase) => phase)
+
+    if (specFiles) {
+        specFiles.forEach((specFile) => {
+            const specFileExists = allSpecsInAllPhases.filter(spec => (
+                spec.endsWith(specFile) && path.basename(specFile) === path.basename(spec)
+            ) || (path.resolve(specFile) === path.resolve(spec)));
+
+            if (!specFileExists.length) {
+                console.log(orange(`WARNING: "${specFile}" was not found in any test phase`));
+            }
+        });
+    }
 
     if (!cypressConfigPhasesUnsorted.length) {
         console.error(red('CRITICAL ERROR: No test phases were found!'));
