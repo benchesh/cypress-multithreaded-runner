@@ -38,6 +38,19 @@ const writeFileSyncRecursive = (filepath, content = '') => {
     fs.writeFileSync(filepath, content, { flag: 'w' });
 };
 
+/**
+ * Write JSON to a file. Will create the file & destination folder if they don't exist
+ * 
+ * BASED ON https://gist.github.com/drodsou/de2ba6291aea67ffc5bc4b52d8c32abd?permalink_comment_id=4137595#gistcomment-4137595
+ * 
+ * @param {string} filepath the path of the file to write to
+ * @param {string} obj the contents to write to the file
+ */
+const writeJsonSyncRecursive = (filepath, obj) => {
+    mkdirSyncIfMissing(path.dirname(filepath));
+    fs.writeFileSync(filepath, `${JSON.stringify(obj, null, 4)}\n`);
+}
+
 // const getDirectories = (srcpath) => (
 //     fs.existsSync(srcpath) ? fs.readdirSync(srcpath) : []
 // ).map((file) => path.join(srcpath, file))
@@ -223,7 +236,7 @@ module.exports = async (config = {}) => {
             const runMostRecentlyFailedSpecFilesFromReportsDir = path.resolve(fullConfig.runMostRecentlyFailedSpecFilesFromReportsDir);
 
             if (!fs.existsSync(runMostRecentlyFailedSpecFilesFromReportsDir)) {
-                throw new Error(`Directory "${fullConfig.runMostRecentlyFailedSpecFilesFromReportsDir}" doesn\'t exist`);
+                throw new Error(`Directory "${runMostRecentlyFailedSpecFilesFromReportsDir}" doesn\'t exist`);
             }
 
             const allHTMLFilesNewestToOldest = getFilesRecursive(runMostRecentlyFailedSpecFilesFromReportsDir)
@@ -311,14 +324,17 @@ module.exports = async (config = {}) => {
             ...fullConfig.phaseDefaults,
             ...phase
         }
-    }).map(phase => {
+    }).map((phase, phaseNo) => {
         return {
             ...phase,
+            title: `[PHASE #${phaseNo + 1}${phase.title ? `: ${phase.title}` : ''}]`,
             specsDir: phase.specsDir ? path.join(phase.specsDir) : null,
             cypressConfigFilepath: phase.cypressConfig?.filepath ? path.join(phase.cypressConfig.filepath) : null,
             cypressConfigObject: phase.cypressConfig?.object,
             onlyRunSpecFilesIncludingAnyText: strArrayTransformer(phase.onlyRunSpecFilesIncludingAnyText),
             onlyRunSpecFilesIncludingAllText: strArrayTransformer(phase.onlyRunSpecFilesIncludingAllText),
+            onlyRunSpecFilesNotIncludingAnyText: strArrayTransformer(phase.onlyRunSpecFilesNotIncludingAnyText),
+            onlyRunSpecFilesNotIncludingAllText: strArrayTransformer(phase.onlyRunSpecFilesNotIncludingAllText),
             additionalCypressEnvArgs: (() => {
                 const grepTags = phase.grepTags ? `grepTags="${phase.grepTags}"` : null;
                 const grep = phase.grep ? `grep="${phase.grep}"` : null;
@@ -351,6 +367,8 @@ module.exports = async (config = {}) => {
                 specsDir: phase.specsDir,
                 onlyRunSpecFilesIncludingAnyText: phase.onlyRunSpecFilesIncludingAnyText,
                 onlyRunSpecFilesIncludingAllText: phase.onlyRunSpecFilesIncludingAllText,
+                onlyRunSpecFilesNotIncludingAnyText: phase.onlyRunSpecFilesNotIncludingAnyText,
+                onlyRunSpecFilesNotIncludingAllText: phase.onlyRunSpecFilesNotIncludingAllText,
                 additionalCypressEnvArgs: phase.additionalCypressEnvArgs
             })
         })
@@ -424,11 +442,16 @@ module.exports = async (config = {}) => {
             return {
                 ...phase.cypressConfigObject, // add a custom config to every thread to pass into the shell script
                 specPattern: (() => {
-                    const specsList = phase.onlyRunSpecFilesIncludingAnyText || phase.onlyRunSpecFilesIncludingAllText
+                    const specsList = phase.onlyRunSpecFilesIncludingAnyText
+                        || phase.onlyRunSpecFilesIncludingAllText
+                        || phase.onlyRunSpecFilesNotIncludingAnyText
+                        || phase.onlyRunSpecFilesNotIncludingAllText
                         ? getFilesRecursive(spec).filter(file => {
                             const fileStr = fs.readFileSync(file).toString('utf8').toLowerCase();
                             return (phase.onlyRunSpecFilesIncludingAnyText || ['']).some(text => fileStr.includes(text))
                                 && (phase.onlyRunSpecFilesIncludingAllText || ['']).every(text => fileStr.includes(text))
+                                && (!phase.onlyRunSpecFilesNotIncludingAnyText || phase.onlyRunSpecFilesNotIncludingAnyText.every(text => !fileStr.includes(text)))
+                                && (!phase.onlyRunSpecFilesNotIncludingAllText || phase.onlyRunSpecFilesNotIncludingAllText.some(text => !fileStr.includes(text)))
                         })
                         : [spec];
 
@@ -508,7 +531,7 @@ module.exports = async (config = {}) => {
 
     cypressConfigPhasesSorted.forEach((phase, phaseIndex) => {
         const phaseNo = Number(phaseIndex) + 1;
-        initLogs.push(`[PHASE ${phaseNo}]`);
+        initLogs.push(phases[phaseIndex].title);
 
         let skipLoop = false;
 
@@ -560,6 +583,20 @@ module.exports = async (config = {}) => {
 
         if (phases[phaseIndex].onlyRunSpecFilesIncludingAllText) {
             const note = `For phase #${phaseNo}, onlyRunSpecFilesIncludingAllText is set to ["${phases[phaseIndex].onlyRunSpecFilesIncludingAllText.join('", "')}"]. Therefore, only spec files that contain all strings from this array will be processed.`;
+
+            initLogs.push(note);
+            reportHeadNotes.push(note);
+        }
+
+        if (phases[phaseIndex].onlyRunSpecFilesNotIncludingAnyText) {
+            const note = `For phase #${phaseNo}, onlyRunSpecFilesNotIncludingAnyText is set to ["${phases[phaseIndex].onlyRunSpecFilesNotIncludingAnyText.join('", "')}"]. Therefore, only spec files that do not contain any strings from this array will be processed.`;
+
+            initLogs.push(note);
+            reportHeadNotes.push(note);
+        }
+
+        if (phases[phaseIndex].onlyRunSpecFilesNotIncludingAllText) {
+            const note = `For phase #${phaseNo}, onlyRunSpecFilesNotIncludingAllText is set to ["${phases[phaseIndex].onlyRunSpecFilesNotIncludingAllText.join('", "')}"]. Therefore, only spec files that do not contain all strings from this array will be processed.`;
 
             initLogs.push(note);
             reportHeadNotes.push(note);
@@ -1141,7 +1178,7 @@ module.exports = async (config = {}) => {
             cypressConfigPhasesSorted.forEach((_, phaseIndex) => {
                 const phaseNo = Number(phaseIndex) + 1;
 
-                str += `[PHASE ${phaseNo}]\n\n`;
+                str += `${phases[phaseIndex].title}\n\n`;
 
                 const phaseThreads = Object.values(threadsMeta).filter(thread => thread.phaseNo === phaseNo);
 
@@ -1330,7 +1367,7 @@ module.exports = async (config = {}) => {
                         break;
                 }
 
-                fs.writeFileSync(file, JSON.stringify(data, null, 4));
+                writeJsonSyncRecursive(file, data);
             }
         } catch (err) { }
     });
@@ -1443,10 +1480,10 @@ module.exports = async (config = {}) => {
             }
         }
 
-        fs.writeFileSync(threadBenchmarkFilepath, `${JSON.stringify({
+        writeJsonSyncRecursive(threadBenchmarkFilepath, {
             ...savedThreadBenchmark,
             [benchmarkId]: benchmarkObj
-        }, null, 4)}\n`);
+        });
 
         console.log(`Benchmark file updated: ${threadBenchmarkFilepath}`);
     }
@@ -1532,9 +1569,7 @@ module.exports = async (config = {}) => {
         getFiles(updatedAllureHistoryPath).forEach((file) => {
             if (file.endsWith('.json')) {
                 try {
-                    fs.writeFileSync(file, `${JSON.stringify(JSON.parse(
-                        fs.readFileSync(file).toString('utf8')
-                    ), null, 4)}\n`);
+                    writeJsonSyncRecursive(file, JSON.parse(fs.readFileSync(file).toString('utf8')));
                 } catch (err) {
                     console.warn(orange(`WARNING: Failed to parse Allure history file "${file}"`));
                 }
