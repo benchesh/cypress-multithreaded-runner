@@ -190,7 +190,10 @@ module.exports = async (config = {}) => {
     const clean = fullConfig.clean;
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
     const logMode = fullConfig.logMode || 1;
-    const allureReportHeading = fullConfig.allureReportHeading;
+    const allureReportHeading = fullConfig.allureReportHeadingFinal;
+
+    console.log(allureReportHeading)
+
     const orderThreadsByBenchmark = fullConfig.orderThreadsByBenchmark ?? true;
     const saveThreadBenchmark = fullConfig.saveThreadBenchmark ?? true;
     const threadBenchmarkFilepath = fullConfig.threadBenchmarkFilepath || 'cmr-benchmarks.json';
@@ -1688,6 +1691,8 @@ module.exports = async (config = {}) => {
                 return `${browserStackObservabilityURL ? `<strong>View the BrowserStack Test Observability report here: <a href="${browserStackObservabilityURL}">${browserStackObservabilityURL}</a></strong><br><br>` : ''}${msg}`;
             }
 
+            const hasCriticalErrors = (criticalErrorThreads.length || timeoutErrorThreads.length);
+
             const cmrAllureBody = `<body>
                 <div class="cmr-hidden">
                 <script type="application/json" id="cmr-run-config">${JSON.stringify({
@@ -1697,9 +1702,9 @@ module.exports = async (config = {}) => {
             }, null, 4)}</script>
                 </div>
                 <div class="cmr-content cmr-header">
-                    <div class="cmr-${status} cmr-headline"><h2 id="cmr-collapse">⬇️</h2><h2>${allureReportHeading}${(criticalErrorThreads.length || timeoutErrorThreads.length) ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
-                    ${(criticalErrorThreads.length || timeoutErrorThreads.length) ? `
-                    <div class="cmr-error cmr-summary">
+                    <div class="cmr-${status} cmr-headline"><h2 id="cmr-collapse">➡️</h2><h2>${allureReportHeading}${hasCriticalErrors ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
+                    ${hasCriticalErrors ? `
+                    <div class="cmr-error cmr-summary cmr-hidden">
                         ${printHeaderMsg((() => {
                 let str = 'Be advised! This Allure report doesn\'t tell the full story.'
 
@@ -1723,20 +1728,20 @@ module.exports = async (config = {}) => {
             })())}
                     </div>` : ''}
                     ${minorErrorThreads.length ? `
-                    <div class="cmr-error cmr-summary">
+                    <div class="cmr-error cmr-summary cmr-hidden">
                         ${printHeaderMsg(minorErrorThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>'))}
                     </div>` : ''}
                     ${warnThreads.length ? `
-                    <div class="cmr-warn cmr-summary">
+                    <div class="cmr-warn cmr-summary cmr-hidden">
                         ${printHeaderMsg(warnThreads.map(threadNo => threadsMeta[threadNo].summary).join('<br>'))}
                     </div>` : ''}
                     ${status === 'success' ? `
-                    <div class="cmr-success cmr-summary">
+                    <div class="cmr-success cmr-summary cmr-hidden">
                         ${printHeaderMsg('Everything seems completely fine! No tests needed retrying.')}
                     </div>
                     `: ''}
                     ${reportHeadNotes.length ? `
-                    <div class="cmr-notes cmr-summary">
+                    <div class="cmr-notes cmr-summary cmr-hidden">
                         ${reportHeadNotes.map(note => `NOTE: ${note}`).join('<br>')}
                     </div>` : ''}
                 </div>`;
@@ -1903,6 +1908,8 @@ module.exports = async (config = {}) => {
                         let collapseIcon = document.querySelector('#cmr-collapse');
                         collapseIcon.innerText = collapseIcon.innerText === '⬇️' ? '➡️' : '⬇️';
                     });
+
+                    ${hasCriticalErrors ? `cmrHeadline.click();` : ''}
                     </script>
                 </body>`;
 

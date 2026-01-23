@@ -121,7 +121,7 @@ module.exports = (config = {}) => {
     });
   });
 
-  let experimentResultsStr = `\n${fullConfig.allureReportHeading}\n\nMax concurrent threads experiment results:\n\n`;
+  let experimentResultsStr = `\n${fullConfig.allureReportHeadingFinal}\n\nMax concurrent threads experiment results:\n\n`;
   let experimentResultsHTML = `<!DOCTYPE html>
 <html>
 <head>
