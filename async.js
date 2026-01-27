@@ -1701,7 +1701,7 @@ module.exports = async (config = {}) => {
                 ...benchmarkObj
             }, null, 4)}</script>
                 </div>
-                <button style="position: absolute; right: 0px; padding: 5px 10px; font-size: 16px; background: rgba(0, 0, 0, 0.6); filter: drop-shadow(white 0px 0px 0px); border: 0px; display: block; color: white;" id="cmr-take-screenshot">Take screenshot &#128247;</button>
+                <button style="position: absolute; right: 0px; padding: 5px 10px; font-size: 16px; background: rgba(0, 0, 0, 0.6); filter: drop-shadow(white 0px 0px 0px); border: 0px; display: none; color: white;" id="cmr-take-screenshot">Take screenshot &#128247;</button>
                 <div style="position: fixed; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); padding: min(100px, 10%); z-index: 100; margin: 0px auto; display: none;" id="cmr-screenshot-modal"><div style="
                     background: black;
                     width: 100%;
@@ -1946,8 +1946,12 @@ module.exports = async (config = {}) => {
 
                     ${hasCriticalErrors ? `cmrHeadline.click();` : ''}
                     </script>
-                    <script>${fs.readFileSync(require.resolve('./lib/html2canvas.min.js')).toString()}</script>
+                    <script src="https://unpkg.com/@zumer/snapdom/dist/snapdom.js"></script>
                     <script>
+                    if (typeof snapdom !== 'undefined'){
+                        document.getElementById('cmr-take-screenshot').style.display='block';
+                    }
+
                     async function copyImgElementToClipboard(imgElement) {
                         try {
                             const canvas = document.createElement("canvas");
@@ -1982,10 +1986,8 @@ module.exports = async (config = {}) => {
                         document.getElementById('cmr-take-screenshot').style.display='none';
                         document.querySelector('.cmr-footer').style.display='none';
 
-                        html2canvas(document.body, {
-                            scale: 2,
-                        }).then(function(canvas) {
-                            document.getElementById('cmr-screenshot-output').src = canvas.toDataURL("image/png");
+                        snapdom.toPng(document.body).then(img => {
+                            document.getElementById('cmr-screenshot-output').src = img.src;
                             document.getElementById('cmr-screenshot-modal').style.display='block';
                             document.getElementById('cmr-take-screenshot').style.display='block';
                             document.querySelector('.cmr-footer').style.display='block';
