@@ -190,9 +190,9 @@ module.exports = async (config = {}) => {
     const clean = fullConfig.clean;
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
     const logMode = fullConfig.logMode || 1;
-    const allureReportHeading = fullConfig.allureReportHeadingFinal;
+    const allureReportHeadingHTML = fullConfig.allureReportHeadingFinal.replace('Cypress Multithreaded Runner:', '<span style="font-size:9pt;position:absolute;top:5px;opacity:0.8;">Cypress Multithreaded Runner:</span>');
 
-    console.log(allureReportHeading)
+    console.log(fullConfig.allureReportHeadingFinal);
 
     const orderThreadsByBenchmark = fullConfig.orderThreadsByBenchmark ?? true;
     const saveThreadBenchmark = fullConfig.saveThreadBenchmark ?? true;
@@ -1701,8 +1701,42 @@ module.exports = async (config = {}) => {
                 ...benchmarkObj
             }, null, 4)}</script>
                 </div>
+                <button style="position: absolute; right: 0px; padding: 5px 10px; font-size: 16px; background: rgba(0, 0, 0, 0.6); filter: drop-shadow(white 0px 0px 0px); border: 0px; display: block; color: white;" id="cmr-take-screenshot">Take screenshot &#128247;</button>
+                <div style="position: fixed; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); padding: min(100px, 10%); z-index: 100; margin: 0px auto; display: none;" id="cmr-screenshot-modal"><div style="
+                    background: black;
+                    width: 100%;
+                    height: 100%;
+                    box-shadow: 0 0 64px rgba(0,0,0,1);
+                    position: relative;
+                "><button style="
+                    color: white;
+                    position: absolute;
+                    filter: drop-shadow(0 0 10px black);
+                    padding: 10px;
+                    background: rgba(0,0,0,0.7);
+                    right: 0;
+                    font-size: 16px;
+                    top: 70px;
+                    border: 0;
+                    text-align: left;
+                " id="cmr-copy-to-clipboard">Copy to clipboard &#128190;<span id="cmr-copied-to-clipboard" style="color: lawngreen; display: none;">Copied!</span></button>
+                <button style="
+                    color: white;
+                    padding: 0 10px;
+                    right: 0;
+                    border: 0;
+                    font-size: 60px;
+                    background: rgba(0,0,0,0.7);
+                    position: absolute;
+                    filter: drop-shadow(0 0 10px black);
+                " id="cmr-screenshot-modal-close">X</button>
+                <img id="cmr-screenshot-output" style="
+                    width: 100%;
+                    height: 100%;
+                    object-fit: contain;
+                "></div></div>
                 <div class="cmr-content cmr-header">
-                    <div class="cmr-${status} cmr-headline"><h2 id="cmr-collapse">➡️</h2><h2>${allureReportHeading}${hasCriticalErrors ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
+                    <div class="cmr-${status} cmr-headline"><h2 id="cmr-collapse">➡️</h2><h2>${allureReportHeadingHTML}${hasCriticalErrors ? ' [CRITICAL ERRORS - PLEASE READ]' : ''}</h2></div>
                     ${hasCriticalErrors ? `
                     <div class="cmr-error cmr-summary cmr-hidden">
                         ${printHeaderMsg((() => {
@@ -1790,6 +1824,7 @@ module.exports = async (config = {}) => {
 
                     .cmr-headline h2 {
                         cursor: pointer;
+                        display: inline;
                     }
                 
                     .cmr-content div {
@@ -1910,6 +1945,64 @@ module.exports = async (config = {}) => {
                     });
 
                     ${hasCriticalErrors ? `cmrHeadline.click();` : ''}
+                    </script>
+                    <script>${fs.readFileSync(require.resolve('./lib/html2canvas.min.js')).toString()}</script>
+                    <script>
+                    async function copyImgElementToClipboard(imgElement) {
+                        try {
+                            const canvas = document.createElement("canvas");
+                            canvas.width = imgElement.naturalWidth;
+                            canvas.height = imgElement.naturalHeight;
+                            const ctx = canvas.getContext("2d");
+                            ctx.drawImage(imgElement, 0, 0);
+
+                            const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+                            const clipboardItem = new ClipboardItem({ "image/png": blob });
+                            await navigator.clipboard.write([clipboardItem]);
+                            
+                            console.log("Image from <img> copied!");
+                        } catch (err) {
+                            console.error("Error copying image from <img>", err);
+                        }
+                    }
+
+                    document.getElementById('cmr-copy-to-clipboard').addEventListener("click", () => {
+                        copyImgElementToClipboard(document.querySelector("#cmr-screenshot-output"));
+                        document.getElementById('cmr-copied-to-clipboard').style.display='block';
+                        setTimeout(() => {
+                            document.getElementById('cmr-copied-to-clipboard').style.display='none';
+                        }, 2000);
+                    });
+
+                    document.getElementById('cmr-screenshot-modal-close').addEventListener("click", () => {
+                        document.getElementById('cmr-screenshot-modal').style.display='none';
+                    });
+
+                    document.getElementById('cmr-take-screenshot').addEventListener("click", () => {
+                        document.getElementById('cmr-take-screenshot').style.display='none';
+                        document.querySelector('.cmr-footer').style.display='none';
+
+                        html2canvas(document.body, {
+                            scale: 2,
+                        }).then(function(canvas) {
+                            document.getElementById('cmr-screenshot-output').src = canvas.toDataURL("image/png");
+                            document.getElementById('cmr-screenshot-modal').style.display='block';
+                            document.getElementById('cmr-take-screenshot').style.display='block';
+                            document.querySelector('.cmr-footer').style.display='block';
+                        });
+                    });
+
+                    document.addEventListener('click', e => {
+                        if (e.target.id === 'cmr-screenshot-modal') {
+                            document.getElementById('cmr-screenshot-modal').style.display='none';
+                        }
+                    })
+
+                    document.addEventListener("keydown", (event) => {
+                        if (event.key === "Escape") {
+                            document.getElementById('cmr-screenshot-modal').style.display='none';
+                        }
+                    });
                     </script>
                 </body>`;
 
