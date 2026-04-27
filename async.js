@@ -654,6 +654,13 @@ module.exports = async (config = {}) => {
     async function spawnThread(threadNo, restartAttempts = 0, threadStarted = false) {
         let restartTests = false;
 
+        const allureDirs = [
+            path.join(allureResultsPath, String(threadNo)),
+
+            // TODO: Fallback needed until this bug is fixed: https://github.com/mmisty/cypress-allure-adapter/issues/268
+            path.join(allureResultsPath, `${String(threadNo)}_fallback`)
+        ];
+
         if (threadsMeta[threadNo].pid) {// failsafe
             kill(threadsMeta[threadNo].pid);
             threadsMeta[threadNo].pid = false;
@@ -796,6 +803,15 @@ module.exports = async (config = {}) => {
 
         setThreadTimeLimitTimer();
 
+        const illegalLogs = (logLC) => logLC.includes('uncaught error was detected outside of a test')
+            || logLC.includes('we are skipping the remaining tests in the current suite')
+            || logLC.includes('we have failed the current spec')
+            || logLC.includes('we detected that the chromium renderer process just crashed')
+            || logLC.includes('cypress could not associate this error to any specific test.')
+            || logLC.includes('cypress: fatal io error')
+            || logLC.includes('webpack compilation error')
+            || logLC.includes('this error occurred during a `before');
+
         // detect known internal errors and restart the tests when they occur!
         const logCheck = async (log) => {
             if (log.includes('<FALLBACK_SHELL_EXIT>')) {
@@ -822,14 +838,7 @@ module.exports = async (config = {}) => {
             const logLC = log.toLowerCase();
 
             if (
-                logLC.includes('uncaught error was detected outside of a test')
-                || logLC.includes('we are skipping the remaining tests in the current suite')
-                || logLC.includes('we have failed the current spec')
-                || logLC.includes('we detected that the chromium renderer process just crashed')
-                || logLC.includes('cypress could not associate this error to any specific test.')
-                || logLC.includes('cypress: fatal io error')
-                || logLC.includes('webpack compilation error')
-                || logLC.includes('this error occurred during a `before all`')
+                illegalLogs(logLC)
             ) {
                 restartTests = true;
                 verboseLog(`Internal Cypress error in thread #${threadNo}`, logLC);
@@ -881,6 +890,31 @@ module.exports = async (config = {}) => {
         }
 
         logCheck(`Start of thread #${threadNo}:\n`);
+
+        // Scan all JSON files within the thread's allure-results directories
+        // (both the main and `_fallback` directories) for any illegal log strings,
+        // so that restart-worthy errors recorded inside test result payloads
+        // (rather than only stdout/stderr) are still detected.
+        const scanAllureJsonsForIllegalLogs = () => {
+            for (const dir of allureDirs) {
+                if (!fs.existsSync(dir)) continue;
+
+                const files = getFiles(dir).filter(file => file.endsWith('.json'));
+
+                for (const file of files) {
+                    try {
+                        const contents = fs.readFileSync(file, 'utf8').toLowerCase();
+
+                        if (illegalLogs(contents)) {
+                            customWarning(threadNo, `Illegal log detected in Allure result file "${file}" for thread #${threadNo}`);
+                            return true;
+                        }
+                    } catch (err) { }
+                }
+            }
+
+            return false;
+        };
 
         const threadCompleteFunc = (forceFail) => {
             clearTimeout(threadsMeta[threadNo].threadTimeLimitTimer);
@@ -940,11 +974,15 @@ module.exports = async (config = {}) => {
                 clearTimeout(threadsMeta[threadNo].fallbackCloseTimer);
 
                 if (
-                    threadsMeta[threadNo].errorType !== 'timeout' &&
-                    restartTests
-                    || (
+                    (
+                        threadsMeta[threadNo].errorType !== 'timeout'
+                        && restartTests
+                    ) || (
                         !threadsMeta[threadNo].errorType
                         && !threadsMeta[threadNo].logs.includes('(Run Finished)')
+                    ) || (
+                        threadsMeta[threadNo].errorType !== 'timeout'
+                        && scanAllureJsonsForIllegalLogs()
                     )
                 ) {
                     restartAttempts++;
@@ -956,14 +994,9 @@ module.exports = async (config = {}) => {
                         customWarning(threadNo, `WARNING: Internal Cypress error in thread #${threadNo}! Will retry a maximum of ${maxThreadRestarts - restartAttempts} more time${(maxThreadRestarts - restartAttempts) !== 1 ? 's' : ''}.`);
 
                         // delete any test results as they'll interfere with the next run
-                        if (fs.pathExistsSync(path.join(allureResultsPath, String(threadNo)))) {
-                            fs.rmSync(path.join(allureResultsPath, String(threadNo)), { recursive: true, force: true });
-                        }
-
-                        // TODO: Fallback needed until this bug is fixed: https://github.com/mmisty/cypress-allure-adapter/issues/268
-                        if (fs.pathExistsSync(path.join(allureResultsPath, `${String(threadNo)}_fallback`))) {
-                            fs.rmSync(path.join(allureResultsPath, `${String(threadNo)}_fallback`), { recursive: true, force: true });
-                        }
+                        allureDirs.forEach((dir) => {
+                            if (fs.pathExistsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+                        });
 
                         await spawnThread(threadNo, restartAttempts, threadStarted);
                     } else {
