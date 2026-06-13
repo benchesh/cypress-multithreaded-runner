@@ -190,7 +190,7 @@ module.exports = async (config = {}) => {
     const clean = fullConfig.clean;
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
     const logMode = fullConfig.logMode || 1;
-    const allureReportHeadingHTML = fullConfig.allureReportHeadingFinal.replace('Cypress Multithreaded Runner:', '<span style="font-size:9pt;position:absolute;top:5px;opacity:0.8;">Cypress Multithreaded Runner:</span>');
+    const allureReportHeadingHTML = fullConfig.allureReportHeadingFinal.replace('Cypress Multithreaded Runner:', '<span style="font-size:9pt;position:absolute;top:0;opacity:0.8;">Cypress Multithreaded Runner:</span>');
 
     console.log(fullConfig.allureReportHeadingFinal);
 
@@ -1721,7 +1721,7 @@ module.exports = async (config = {}) => {
 
                 printedHeaderMsg = true;
 
-                return `${browserStackObservabilityURL ? `<strong>View the BrowserStack Test Observability report here: <a href="${browserStackObservabilityURL}">${browserStackObservabilityURL}</a></strong><br><br>` : ''}${msg}`;
+                return `${browserStackObservabilityURL ? `<span style="font-weight: bold;">View the BrowserStack Test Observability report here: <a href="${browserStackObservabilityURL}">${browserStackObservabilityURL}</a></span><br><br>` : ''}${msg}`;
             }
 
             const hasCriticalErrors = (criticalErrorThreads.length || timeoutErrorThreads.length);
@@ -1735,7 +1735,7 @@ module.exports = async (config = {}) => {
                 ...benchmarkObj
             }, null, 4)}</script>
                 </div>
-                <button style="position: absolute; right: 0px; padding: 5px 10px; font-size: 16px; background: rgba(0, 0, 0, 0.6); filter: drop-shadow(white 0px 0px 0px); border: 0px; display: none; color: white;" id="cmr-take-screenshot">${screenshotText}</button>
+                <button id="cmr-take-screenshot">${screenshotText}</button>
                 <div style="position: fixed; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); padding: min(100px, 10%); z-index: 100; margin: 0px auto; display: none;" id="cmr-screenshot-modal"><div style="
                     background: black;
                     width: 100%;
@@ -1781,15 +1781,15 @@ module.exports = async (config = {}) => {
                 }
 
                 if (phaseLock && phaseLock < fullConfig.phases.length) {
-                    str += ` One or more tests in <strong>phase #${phaseLock} failed</strong>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>`
+                    str += ` One or more tests in <span style="font-weight: bold;">phase #${phaseLock} failed</span>, therefore any tests from threads in subsequent phases did not complete. They'll all be marked as having critical errors.<br><br>`
                 }
 
                 if (criticalErrorThreads.length) {
-                    str += ` <strong>Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</strong> and didn't complete!`;
+                    str += ` <span style="font-weight: bold;">Thread ${arrToNaturalStr(criticalErrorThreads.map(num => `#${num}`))} had ${criticalErrorThreads.length > 1 ? 'critical errors' : 'a critical error'}</span> and didn't complete!`;
                 }
 
                 if (timeoutErrorThreads.length) {
-                    str += ` <strong>Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</strong> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.`
+                    str += ` <span style="font-weight: bold;">Thread ${arrToNaturalStr(timeoutErrorThreads.map(num => `#${num}`))} ${timeoutErrorThreads.length > 1 ? 'were' : 'was'} stopped early</span> because ${timeoutErrorThreads.length > 1 ? 'they each' : 'it'} failed to complete within the maximum time limit of ${secondsToNaturalString(threadTimeLimit)}.`
                 }
 
                 return `${str} Therefore, one or more spec files may have not been fully tested!`;
@@ -1814,19 +1814,24 @@ module.exports = async (config = {}) => {
                     </div>` : ''}
                 </div>`;
 
-            const cmrAllureFooter = `<div class="cmr-content cmr-footer">${allLogs
+            const cmrAllureFooter = `<div class="cmr-content cmr-footer"><section class="cmr-all-logs">${allLogs
                 .replace(/Couldn't find tsconfig.json. tsconfig-paths will be skipped\n/g, '')// this warning is noisy, remove it
                 .replace(/tput: No value for \$TERM and no -T specified\n/g, '')// this warning is noisy, remove it
-                }<div class="cmr-report"><button id="cmr-open-all">Open all logs above</button><button id="cmr-close-all">Close all logs above</button><br><br><h2 class="cmr-sticky">Thread Performance Summary</h2><pre>${[threadSummary.summary, reportText].filter(s => s).join('\n\n')}</pre></div></div>
+                }</section><div class="cmr-report">
+                <span class="cmr-report-buttons">
+                    <button id="cmr-open-all">Open all logs above</button>
+                    <button id="cmr-close-all">Close all logs above</button>
+                    <span id="cmr-show-errors-only"><input type="checkbox" id="cmr-checkbox-show-errors-only" style="margin-right: 5px;vertical-align: bottom;" checked> Only show threads with errors/warnings</span>
+                </span>
+                <br><br><h2 class="cmr-sticky">Thread Performance Summary</h2><pre>${[threadSummary.summary, reportText].filter(s => s).join('\n\n')}</pre></div></div>
                 
                     <style>
                     .cmr-content {
                         overflow-wrap: anywhere;
                         outline: 2px solid #343434;
-                    }
-
-                    .cmr-content #cmr-close-all {
-                        margin-left: 20px;
+                        position: relative;
+                        z-index: 10;
+                        line-height: 16px;
                     }
 
                     .cmr-footer h2 {
@@ -1866,12 +1871,29 @@ module.exports = async (config = {}) => {
                         background: white;
                     }
 
-                    .cmr-content > * {
+                    #cmr-take-screenshot {
+                        position: absolute;
+                        right: 0px;
+                        padding: 5px 10px;
+                        font-size: 16px;
+                        background: rgba(0, 0, 0, 0.6);
+                        filter: drop-shadow(white 0px 0px 0px);
+                        border: 0px;
+                        display: none;
+                        color: white;
+                        z-index: 100;
+                    }
+
+                    .cmr-content > *,.cmr-all-logs > * {
                         outline: 1px solid #343434;
                     }
 
                     .cmr-hidden {
                         display: none;
+                    }
+
+                    .cmr-content a {
+                        color: mediumblue;
                     }
 
                     .cmr-thread-pre {
@@ -1924,8 +1946,81 @@ module.exports = async (config = {}) => {
                         padding: 5px;
                         border-radius: 6px;
                     }
+
+                    [data-theme="dark"] .cmr-content #cmr-pre-content,
+                    [data-theme="dark"] .cmr-content #cmr-pre-content *,
+                    [data-theme="dark"] .cmr-report {
+                        background:rgb(27, 33, 41);
+                        color: rgba(246, 250, 254, 0.96);
+                    }
+
+                    .cmr-content,.cmr-content button {
+                    font-family: Helvetica, Arial, sans-serif;
+                        color:black;
+                    }
+
+                    .cmr-content h2 {
+                    font-size:21px;
+                    font-weight:700;
+                        line-height: 26px;
+                    }
+
+                    .cmr-content pre {
+                        font-family: monospace, serif;
+                        font-weight: 500;
+                        font-size: 14px;
+                        line-height: 18px;
+                    }
+
+                    .cmr-report pre {
+                        margin-block: 1em 1em;
+                    }
+
+                    .cmr-report-buttons {
+                        display: flex;
+                        gap: 20px;
+                        align-items: center;
+                        flex-wrap: wrap;
+                    }
+
+                    .cmr-disabled {
+                        opacity: 0.5;
+                        pointer-events: none;
+                        user-select: none;
+                    }
                     </style>
+                    <style id="cmr-layout-hacks"></style>
+                    <style id="cmr-footer-hacks">.cmr-thread.cmr-success { display: none !important; }</style>
                     <script>
+                    const handleOpenCloseAllButtons = () => {
+                        document.querySelector('#cmr-open-all').classList.remove('cmr-disabled');
+                        document.querySelector('#cmr-close-all').classList.remove('cmr-disabled');
+
+                        let visibleDropdowns=0;
+                        let visibleDropdownsOpen=0;
+                        let visibleDropdownsClosed=0;
+
+                        document.querySelectorAll('.cmr-all-logs .cmr-pre-heading').forEach((heading)=>{
+                            if (heading.getBoundingClientRect().width > 0) visibleDropdowns++;
+                        });
+
+                        document.querySelectorAll('.cmr-all-logs .cmr-pre-heading.cmr-pre-heading-active').forEach((heading)=>{
+                            if (heading.getBoundingClientRect().width > 0) visibleDropdownsOpen++;
+                        });
+
+                        document.querySelectorAll('.cmr-all-logs .cmr-pre-heading:not(.cmr-pre-heading-active)').forEach((heading)=>{
+                            if (heading.getBoundingClientRect().width > 0) visibleDropdownsClosed++;
+                        });
+
+                        if(visibleDropdowns === visibleDropdownsOpen){
+                            document.querySelector('#cmr-open-all').classList.add('cmr-disabled');
+                        }
+                            
+                        if(visibleDropdowns === visibleDropdownsClosed){
+                            document.querySelector('#cmr-close-all').classList.add('cmr-disabled');
+                        }
+                    };
+
                     [...document.querySelectorAll('.cmr-pre-heading')].forEach((heading, index) => {
                         const thisIndex = index;
                 
@@ -1947,8 +2042,12 @@ module.exports = async (config = {}) => {
                             const currentTop=e.target.getBoundingClientRect().top;
                             window.scrollBy(0,currentTop-topTarget);
                           }
+                            
+                          handleOpenCloseAllButtons();
                         });
                     });
+
+                    handleOpenCloseAllButtons();
 
                     function getScrollHeightFromBottom(){
                         return Math.ceil(document.documentElement.scrollHeight - window.innerHeight - window.pageYOffset);
@@ -1979,6 +2078,45 @@ module.exports = async (config = {}) => {
                     });
 
                     ${hasCriticalErrors ? `cmrHeadline.click();` : ''}
+
+                    const resizeAllureEls=()=>{
+                        const element1 = document.querySelector('#content');
+
+                        const element2 = document.querySelector('allure-side-nav');
+                        const rect1 = element1.getBoundingClientRect();
+
+                        // Height within current viewport
+                        let visibleHeight = Math.min(rect1.bottom, window.innerHeight) - Math.max(rect1.top, 0);
+                        visibleHeight = Math.max(0, visibleHeight); // Ensure non-negative
+
+                        document.getElementById('cmr-layout-hacks').innerHTML = \`allure-side-nav { max-height: \${visibleHeight}px !important; margin-top: \${rect1.top < 0 ? -rect1.top + 'px !important' : '0px !important'}; }\`;
+                    }
+
+                    window.addEventListener("resize", function(event) {
+                        resizeAllureEls();
+                    });
+                    window.addEventListener("scroll", function(event) {
+                        resizeAllureEls();
+                    });
+                    window.addEventListener("click", function(event) {
+                        resizeAllureEls();
+                    });
+                    document.addEventListener("DOMContentLoaded", (event) => {
+                        resizeAllureEls();
+                    });
+
+                    const footerHacks=document.querySelector('#cmr-footer-hacks').innerHTML;
+                    document.querySelector('#cmr-checkbox-show-errors-only').addEventListener('change', (event) => {
+                        const scrollBef=getScrollHeightFromBottom();
+                        document.querySelector('#cmr-footer-hacks').innerHTML = event.target.checked ? footerHacks : '';
+                        window.scrollTo(0,999999999);
+                        window.scrollBy(0,-scrollBef);
+                        handleOpenCloseAllButtons();
+                    });
+
+                    if(!document.querySelector('.cmr-thread.cmr-success')){
+                        document.querySelector('#cmr-show-errors-only').classList.add('cmr-disabled');
+                    }
                     </script>
                     <script src="https://unpkg.com/@zumer/snapdom/dist/snapdom.js"></script>
                     <script>
@@ -2019,14 +2157,21 @@ module.exports = async (config = {}) => {
                     document.getElementById('cmr-take-screenshot').addEventListener("click", () => {
                         document.getElementById('cmr-take-screenshot').innerHTML = 'Please wait...';
                         setTimeout(() => {
-                            document.getElementById('cmr-take-screenshot').style.display='none';
-                            document.querySelector('.cmr-footer').style.display='none';
+                            document.querySelectorAll('body > :not(.cmr-header):not(#content):not(#cmr-screenshot-modal)').forEach(node=>{
+                                node.setAttribute('data-cmr-style', node.getAttribute('style') || '');
+                                node.setAttribute('style', 'display:none!important');
+                            });
+                            document.querySelectorAll('.widget__subtitle').forEach(node=>{
+                                node.setAttribute('data-cmr-style', node.getAttribute('style') || '');
+                                node.setAttribute('style', 'display:block');
+                            });
                             document.getElementById('cmr-take-screenshot').innerHTML = '${screenshotText}';
                             snapdom.toPng(document.body).then(img => {
                                 document.getElementById('cmr-screenshot-output').src = img.src;
                                 document.getElementById('cmr-screenshot-modal').style.display='block';
-                                document.getElementById('cmr-take-screenshot').style.display='block';
-                                document.querySelector('.cmr-footer').style.display='block';
+                                document.querySelectorAll('[data-cmr-style]').forEach(node=>{
+                                    node.setAttribute('style', node.getAttribute('data-cmr-style') || '');
+                                });
                             });
                         }, 0);
                     });
