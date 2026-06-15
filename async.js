@@ -168,6 +168,27 @@ const deleteEmptyFoldersRecursively = (folder) => {
     }
 }
 
+// Source - https://stackoverflow.com/a/12034334
+// Posted by Tom Gruner, modified by community. See post 'Timeline' for change history
+// Retrieved 2026-06-15, License - CC BY-SA 4.0
+const entityMap = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+    '/': '&#x2F;',
+    '`': '&#x60;',
+    '=': '&#x3D;'
+};
+
+function escapeHtml(string) {
+    return String(string).replace(/[&<>"'`=\/]/g, function (s) {
+        return entityMap[s];
+    });
+}
+
+
 module.exports = async (config = {}) => {
     const startTime = performance.now();
     const timestamp = Date.now();
@@ -190,7 +211,7 @@ module.exports = async (config = {}) => {
     const clean = fullConfig.clean;
     const threadDelay = (fullConfig.threadDelay ?? 30) * 1000;
     const logMode = fullConfig.logMode || 1;
-    const allureReportHeadingHTML = fullConfig.allureReportHeadingFinal.replace('Cypress Multithreaded Runner:', '<span style="font-size:9pt;position:absolute;top:0;opacity:0.8;">Cypress Multithreaded Runner:</span>');
+    const allureReportHeadingHTML = escapeHtml(fullConfig.allureReportHeadingFinal).replace('Cypress Multithreaded Runner:', '<span style="font-size:9pt;position:absolute;top:0;opacity:0.8;">Cypress Multithreaded Runner:</span>');
 
     console.log(fullConfig.allureReportHeadingFinal);
 
@@ -1742,7 +1763,8 @@ module.exports = async (config = {}) => {
                     height: 100%;
                     box-shadow: 0 0 64px rgba(0,0,0,1);
                     position: relative;
-                "><button style="
+                ">
+                <button style="
                     color: white;
                     position: absolute;
                     filter: drop-shadow(0 0 10px black);
@@ -1753,7 +1775,19 @@ module.exports = async (config = {}) => {
                     top: 70px;
                     border: 0;
                     text-align: left;
-                " id="cmr-copy-to-clipboard">Copy to clipboard &#128190;<span id="cmr-copied-to-clipboard" style="color: lawngreen; display: none;">Copied!</span></button>
+                " id="cmr-download">Download &#128190;</button>
+                <button style="
+                    color: white;
+                    position: absolute;
+                    filter: drop-shadow(0 0 10px black);
+                    padding: 10px;
+                    background: rgba(0,0,0,0.7);
+                    right: 0;
+                    font-size: 16px;
+                    top: 109px;
+                    border: 0;
+                    text-align: left;
+                " id="cmr-copy-to-clipboard">Copy to clipboard &#128203;<span id="cmr-copied-to-clipboard" style="color: lawngreen; display: none;">Copied!</span></button>
                 <button style="
                     color: white;
                     padding: 0 10px;
@@ -1764,7 +1798,7 @@ module.exports = async (config = {}) => {
                     position: absolute;
                     filter: drop-shadow(0 0 10px black);
                 " id="cmr-screenshot-modal-close">X</button>
-                <img id="cmr-screenshot-output" style="
+                <img id="cmr-screenshot-output" title="${escapeHtml(`${fullConfig.allureReportHeadingFinal.replace('Cypress Multithreaded Runner:', '')} ${timestamp}`).trim()}" style="
                     width: 100%;
                     height: 100%;
                     object-fit: contain;
@@ -2141,6 +2175,21 @@ module.exports = async (config = {}) => {
                             console.error("Error copying image from <img>", err);
                         }
                     }
+
+                    // insecure pages may disable the clipboard API, so we hide the copy button if the API isn't available
+                    if (typeof ClipboardItem !== 'function'){
+                        document.getElementById('cmr-copy-to-clipboard').style.display='none';
+                    }
+
+                    document.getElementById('cmr-download').addEventListener("click", () => {
+                        const imgElement = document.querySelector("#cmr-screenshot-output");
+                        const link = document.createElement("a");
+                        link.href = imgElement.src;
+                        link.download = imgElement.title + ".png";
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                    });
 
                     document.getElementById('cmr-copy-to-clipboard').addEventListener("click", () => {
                         copyImgElementToClipboard(document.querySelector("#cmr-screenshot-output"));
