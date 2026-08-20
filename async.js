@@ -489,7 +489,11 @@ module.exports = async (config = {}) => {
                     return specsList;
                 })()
             }
-        }).filter((thread) => thread.specPattern.length)
+        }).filter(thread =>
+            (
+                phase.specFileExts || ['js', 'jsx', 'ts', 'tsx', 'coffee']
+            ).some(ext => `.${ext}` === path.extname(thread.specPattern?.[0] || ''))
+        )
     }).filter((phase) => phase)
 
     if (specFiles) {
