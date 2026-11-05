@@ -9,7 +9,7 @@ const runCmr = (config) => {
   execSync(`node -e 'const scr=require("${__dirname}/async");scr(${JSON.stringify(
     config,
   )});'`, {
-    stdio: [null, process.stdout, process.stderr],
+    stdio: [null, process.stdout, process.stderr]
   });
 };
 
@@ -70,7 +70,7 @@ module.exports = (config = {}) => {
           maxConcurrentThreads,
           saveThreadBenchmark: false,
           browserStackTestObservabilityUpload: false,
-          overwriteAllureHistory: false,
+          overwriteAllureHistory: false
         });
       } catch (e) { }
 

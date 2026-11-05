@@ -1510,6 +1510,11 @@ module.exports = async (config = {}) => {
     benchmarkObj.fails = allErrorThreadPaths;
     benchmarkObj.timestamp = timestamp;
 
+    const totalThreadCount = Object.keys(threadsMeta).length;
+    benchmarkObj.successPercentage = totalThreadCount
+        ? Math.round(Math.max(0, (totalThreadCount - allErrorThreadPaths.length) / totalThreadCount) * 10000) / 100
+        : 0;
+
     let compareBenchmarks = true;
 
     if (benchmarkObj.order.length < 2) {
@@ -1752,13 +1757,15 @@ module.exports = async (config = {}) => {
             const hasCriticalErrors = (criticalErrorThreads.length || timeoutErrorThreads.length);
             const screenshotText = 'Take screenshot &#128247;';
 
-            const cmrAllureBody = `<body>
-                <div class="cmr-hidden">
-                <script type="application/json" id="cmr-run-config">${JSON.stringify({
+            const cmrRunConfig = {
                 browserStackObservabilityURL,
                 summary: threadSummary.summary,
                 ...benchmarkObj
-            }, null, 4)}</script>
+            };
+
+            const cmrAllureBody = `<body>
+                <div class="cmr-hidden">
+                <script type="application/json" id="cmr-run-config">${JSON.stringify(cmrRunConfig, null, 4)}</script>
                 </div>
                 <button id="cmr-take-screenshot">${screenshotText}</button>
                 <div style="position: fixed; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); padding: min(100px, 10%); z-index: 100; margin: 0px auto; display: none;" id="cmr-screenshot-modal"><div style="
@@ -2287,6 +2294,8 @@ module.exports = async (config = {}) => {
                     { overwrite: true },
                 );
             }
+
+            writeJsonSyncRecursive(path.resolve(allureReportDir, 'cmr-summary.json'), cmrRunConfig);
 
             console.log(green(`The Allure report for this run has been saved to the following directory: "${allureReportDir}"`));
 
