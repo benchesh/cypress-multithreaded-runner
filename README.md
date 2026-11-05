@@ -10,7 +10,8 @@ NOTE: Currently, generating the Allure report is needed in order for this module
 
 - [node 20 or above](https://nodejs.org/en/download)
 - [Java](https://www.java.com/en/download/)
-- A [Cypress](https://www.npmjs.com/package/cypress) project (tested on versions `12.10` and `13.7`)
+- A [Cypress](https://www.npmjs.com/package/cypress) project
+  - Tested on Cypress version `16.X`. Older versions may work [if you use a different Allure generator than the default one](#generating-the-allure-report)
 - [@cypress/grep](https://www.npmjs.com/package/@cypress/grep) (optional: only needed if you want to use Cypress grep features)
 
 ## Setup
@@ -84,7 +85,12 @@ If this code is missing, you may find that an empty Allure report is generated a
 
 Under the hood this will import both [@mmisty/cypress-allure-adapter](https://www.npmjs.com/package/@mmisty/cypress-allure-adapter) and [allure-cypress](https://www.npmjs.com/package/allure-cypress). The former dependency provides a more comprehensive report, but is less compatible than the latter (for example, it may not work with [WebKit](https://github.com/mmisty/cypress-allure-adapter/issues/268)). Should the former not produce any Allure results for a given thread, results from the latter will be used instead.
 
-This is a little bit hacky. If you experience issues, you can import just the first of these dependencies by using `cypress-multithreaded-runner/allure_nofallback` and `cypress-multithreaded-runner/allure/writer_nofallback` or import a different Allure generator.
+This is a little bit hacky! If you experience issues, you can import just one of these dependencies
+- `cypress-multithreaded-runner/allure_mmisty` and `cypress-multithreaded-runner/allure/writer_mmisty`
+or
+- `cypress-multithreaded-runner/allure_official` and `cypress-multithreaded-runner/allure/writer_official` (this may work on versions of Cypress lower than version 16)
+
+You can use a different Allure generator altogether, but only these have been verified to work correctly with Cypress Multithreaded Runner.
 
 ### Optional: Grep
 
