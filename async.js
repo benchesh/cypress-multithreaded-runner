@@ -1505,7 +1505,7 @@ module.exports = async (config = {}) => {
 
     const allErrorThreadPaths = allErrorThreads.map(threadNo => threadsMeta[threadNo].path);
 
-    benchmarkObj.note = fullConfig.benchmarkNote;
+    benchmarkObj.customMetadata = fullConfig.benchmarkCustomMetadata;
     benchmarkObj.order = [...new Set(Object.values(threadsMeta).filter(thread => thread.perfResults.secs).sort((a, b) => b.perfResults.secs - a.perfResults.secs).map(threadsMeta => threadsMeta.path))];
     benchmarkObj.fails = allErrorThreadPaths;
     benchmarkObj.timestamp = timestamp;
