@@ -231,6 +231,62 @@ module.exports = async (config = {}) => {
     }
 
     const specFiles = await (async () => {
+        if (fullConfig.runFailedSpecFilesFromObject) {
+            let obj = fullConfig.runFailedSpecFilesFromObject;
+
+            // Via the CLI the value arrives as a string, so try to parse it as JSON
+            if (typeof obj === 'string') {
+                try {
+                    obj = JSON.parse(obj);
+                } catch (err) {
+                    throw new Error('runFailedSpecFilesFromObject must be an array or a valid JSON object/string');
+                }
+            }
+
+            // An array is used as-is; otherwise walk the object (depth-first) looking for an array with the key "fails"
+            const findFailsArray = (value) => {
+                if (Array.isArray(value)) {
+                    return null;
+                }
+
+                if (!value || typeof value !== 'object') {
+                    return null;
+                }
+
+                if (Array.isArray(value.fails)) {
+                    return value.fails;
+                }
+
+                for (const child of Object.values(value)) {
+                    const found = findFailsArray(child);
+
+                    if (found) {
+                        return found;
+                    }
+                }
+
+                return null;
+            };
+
+            const fails = Array.isArray(obj) ? obj : findFailsArray(obj);
+
+            if (!fails) {
+                throw new Error('No "fails" array was found in runFailedSpecFilesFromObject');
+            }
+
+            if (!fails.length) {
+                throw new Error('No failed spec files were found in runFailedSpecFilesFromObject');
+            }
+
+            console.log('');
+
+            const str = `${fails.length} failed spec file${fails.length === 1 ? '' : 's'} ${fails.length === 1 ? 'was' : 'were'} found in runFailedSpecFilesFromObject:\n${fails.join('\n')}\n`;
+
+            console.log(green(str));
+
+            return fails;
+        }
+
         if (!fullConfig.runFailedSpecFilesFromReportURL && !fullConfig.runMostRecentlyFailedSpecFilesFromReportsDir) {
             return fullConfig.specFiles ?? null;
         }
