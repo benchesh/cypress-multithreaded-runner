@@ -38,7 +38,6 @@ describe('cypressArgs', () => {
             threadNo: 3,
             allureResultsDir: '/results',
             timestamp: 1,
-            jUnitFile: '/junit/3.xml',
             supportsExpose: true,
         });
 
@@ -46,7 +45,6 @@ describe('cypressArgs', () => {
             'run',
             '--browser', 'chrome',
             '--config-file', 'cypress.config.js',
-            '--reporter', 'junit', '--reporter-options', '{"mochaFile":"/junit/3.xml"}',
             '--e2e',
             '--config', '{"reportDir":"r","specPattern":["cypress/e2e/a.cy.js"]}',
             '--env', `allure=true,allureAddVideoOnPass=true,allureResults=${path.join('/results', '3')},grep="login",timestamp="1"`,

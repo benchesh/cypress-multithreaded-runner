@@ -94,6 +94,15 @@ const SPECS = {
             undefinedFunction();
         });
     `,
+    'specs/titles.cy.js': `
+        describe('Titles', () => {
+            ['draft', 'pending'].forEach((status) => {
+                it(\`created as a \${status} \${status === 'pending' ? 'review' : ''}\`, () => {});
+            });
+            it('  has   extra spaces ', () => {});
+            it('has Allure metadata @allure.id:123 @allure.label.owner:someone', () => {});
+        });
+    `,
 };
 
 describe('TestDiscovery', () => {
@@ -207,6 +216,25 @@ describe('TestDiscovery', () => {
         const result = await discover('basic.cy.js', grepPhase);
 
         assert.deepEqual(result.tests.filter((test) => test.grepIncluded).map((test) => test.fullTitle), ['Basic nested two']);
+    });
+
+    it('titles tests as allure-cypress does, so their results can be matched to them', async () => {
+        const result = await discover('titles.cy.js');
+
+        // without spaces at either end, repeated spaces or Allure metadata, as the test's Allure results have it
+        assert.deepEqual(titles(result), [
+            'Titles created as a draft',
+            'Titles created as a pending review',
+            'Titles has extra spaces',
+            'Titles has Allure metadata',
+        ]);
+        assert.deepEqual(result.tests.map((test) => test.title), ['created as a draft', 'created as a pending review', 'has extra spaces', 'has Allure metadata']);
+
+        // grep still matches the title as written
+        const [grepPhase] = normaliseSettings({ specsDir: 'specs', grep: 'has   extra' }).phases;
+        grepPhase.phaseNo = 98;
+        const grepped = await discover('titles.cy.js', grepPhase);
+        assert.deepEqual(grepped.tests.filter((test) => test.grepIncluded).map((test) => test.fullTitle), ['Titles has extra spaces']);
     });
 
     it('discovers many specs at once, keyed by phase and spec', async () => {

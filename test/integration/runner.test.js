@@ -4,6 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs-extra');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const { runScenario, generatedResults } = require('../helpers/runScenario');
@@ -28,6 +29,38 @@ const threadWarning = (run, threadNo) => {
 };
 
 const statuses = (results) => results.map((result) => `${titleOf(result.fullName)}: ${result.status}`).sort();
+
+// the totals of a JUnit report, and the result of each test case in it (as "<name>: <passed|failure|error|skipped>")
+const readJUnit = (xml) => ({
+    totals: Object.fromEntries(['tests', 'failures', 'errors', 'skipped'].map((key) => [key, Number(xml.match(new RegExp(`<testsuites[^>]* ${key}="(\\d+)"`))[1])])),
+    testCases: [...xml.matchAll(/<testcase name="([^"]*)"[^>]*?(\/>|>\s*<(\w+))/g)]
+        .map(([, name, selfClosing, element]) => `${name}: ${selfClosing === '/>' ? 'passed' : element}`)
+        .sort(),
+});
+
+// stands in for BrowserStack Test Observability, keeping the JUnit report of each upload
+const fakeBrowserStack = async () => {
+    const uploads = [];
+    const server = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', (chunk) => { body += chunk; });
+        req.on('end', () => {
+            uploads.push(body.slice(body.indexOf('<?xml'), body.indexOf('</testsuites>') + '</testsuites>'.length));
+            res.end(JSON.stringify({ message: 'View test reports at https://observability.example/builds/1' }));
+        });
+    });
+
+    await new Promise((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+
+    return {
+        uploads,
+        jUnitReport: {
+            enabled: true,
+            browserStackTestObservabilityUpload: { username: 'user', accessKey: 'key', endpoint: `http://127.0.0.1:${server.address().port}/upload` },
+        },
+        close: () => server.close(),
+    };
+};
 
 describe('runner (real Cypress)', () => {
     scenario('runs every phase, counting every test up front (sync API)', async () => {
@@ -94,9 +127,11 @@ describe('runner (real Cypress)', () => {
     });
 
     scenario('fills in the tests a timed out thread never reached, so the report has every test', async () => {
+        const browserStack = await fakeBrowserStack();
         const run = await runScenario('fills in the tests a timed out thread never reached, so the report has every test', {
             phases: [{ specsDir: 'cypress/e2e/hang' }],
             threadTimeLimit: 20,
+            jUnitReport: browserStack.jUnitReport,
         });
 
         try {
@@ -111,7 +146,20 @@ describe('runner (real Cypress)', () => {
             assert.match(run.readReportFile('thread-performance-summary.txt'), /1 thread didn't complete due to timing out/);
             assert.match(run.reportHtml, /\[CRITICAL ERRORS - PLEASE READ\]/);
             assert.match(run.reportHtml, /was stopped early/);
+
+            // the thread was stopped before Cypress could report anything, but the JUnit report (like the Allure report)
+            // still has every test
+            const expected = {
+                totals: { tests: 4, failures: 0, errors: 3, skipped: 0 },
+                testCases: ['Hang hangs: error', 'Hang never reached a: error', 'Hang never reached b: error', 'Hang passes before the hang: passed'],
+            };
+            assert.deepEqual(readJUnit(run.readReportFile('combined-junit-report.xml')), expected);
+            assert.equal(browserStack.uploads.length, 1);
+            assert.deepEqual(readJUnit(browserStack.uploads[0]), expected);
+            assert.match(run.output, /Uploaded the JUnit report \(4 tests\)/);
+            assert.match(run.readReportFile('allure-report/browserstack_test_observability_report.html'), /url=https:\/\/observability\.example\/builds\/1/);
         } finally {
+            browserStack.close();
             run.cleanup();
         }
     });
@@ -164,6 +212,7 @@ describe('runner (real Cypress)', () => {
         const run = await runScenario('only re-runs previously failed spec files, treating the rest as passed', {
             phases: [{ specsDir: 'cypress/e2e/failing' }, { specsDir: 'cypress/e2e/phase1' }],
             runFailedSpecFilesFromObject: { previousRun: { fails: ['cypress/e2e/failing/fail.cy.js'] } },
+            jUnitReport: { enabled: true },
         });
 
         try {
@@ -171,17 +220,29 @@ describe('runner (real Cypress)', () => {
             assert.match(run.output, /1 thread will be created/);
 
             // fail.cy.js: 1 passed + 1 failed. pass.cy.js (2 tests) & flaky.cy.js (1 test) weren't run: they're assumed to have
-            // passed previously, but as they weren't run in this report they're marked as skipped
-            assert.deepEqual(run.allureStatistic, { failed: 1, broken: 0, skipped: 3, passed: 1, unknown: 0, total: 5 });
-            assert.equal(run.benchmark.successPercentage, 50);
+            // passed previously, so they're marked as passed and count towards the success percentage
+            assert.deepEqual(run.allureStatistic, { failed: 1, broken: 0, skipped: 0, passed: 4, unknown: 0, total: 5 });
+            assert.equal(run.benchmark.successPercentage, 80);
             assert.equal(run.benchmark.tests.assumedPassed, 3);
-            assert.equal(run.benchmark.tests.skipped, 3);
+            assert.equal(run.benchmark.tests.skipped, 0);
             assert.deepEqual(run.benchmark.fails, ['cypress/e2e/failing/fail.cy.js']);
-            assert.match(run.reportHtml, /The other 2 spec files \(3 tests\) weren&#39;t run\. Their tests are assumed to have passed previously, and have been added to this report as skipped/);
+            assert.match(run.reportHtml, /The other 2 spec files \(3 tests\) weren&#39;t run\. Their tests are assumed to have passed previously, and have been added to this report as passed/);
 
             const generated = generatedResults(run.results);
-            assert.deepEqual(generated.map((result) => result.status), ['skipped', 'skipped', 'skipped']);
-            generated.forEach((result) => assert.match(result.statusDetails.message, /This test is therefore assumed to have passed previously and has been marked as skipped in this report\./));
+            assert.deepEqual(generated.map((result) => result.status), ['passed', 'passed', 'passed']);
+            generated.forEach((result) => assert.match(result.statusDetails.message, /This test is therefore assumed to have passed previously and has been marked as passed in this report\./));
+
+            // the JUnit report has them too
+            assert.deepEqual(readJUnit(run.readReportFile('combined-junit-report.xml')), {
+                totals: { tests: 5, failures: 1, errors: 0, skipped: 0 },
+                testCases: [
+                    'Failing suite fails: failure',
+                    'Failing suite passes: passed',
+                    'Flaky suite passes on the second attempt: passed',
+                    'Passing suite nested passes nested: passed',
+                    'Passing suite passes first: passed',
+                ],
+            });
         } finally {
             run.cleanup();
         }
@@ -399,11 +460,22 @@ describe('runner (real Cypress)', () => {
             phases: [{ specsDir: 'cypress/e2e/mixed', passthroughEnvArgs: `retryMarker=${markerDir}` }],
             maxConcurrentThreads: 4,
             retryAllFailedSpecs: 1,
+            // the Cypress output below (e.g. each test's attempts) is the same with a JUnit report as without
+            jUnitReport: { enabled: true },
         });
 
         try {
             assert.equal(run.exitCode, 1, run.output);
             assert.match(run.output, /24 tests found in 7 spec files/);
+
+            // the JUnit report has every test once, with its final result, so it agrees with the Allure report (below),
+            // although threads crashed and spec files were retried
+            const jUnit = readJUnit(run.readReportFile('combined-junit-report.xml'));
+            assert.deepEqual(jUnit.totals, { tests: 24, failures: 3, errors: 3, skipped: 6 });
+            assert.equal(new Set(jUnit.testCases.map((testCase) => testCase.replace(/: \w+$/, ''))).size, 24);
+            assert.ok(jUnit.testCases.includes('Spec retry only passes when the spec file is retried: passed'), jUnit.testCases.join('\n'));
+            assert.ok(jUnit.testCases.includes('Retries fails every attempt: failure'), jUnit.testCases.join('\n'));
+            assert.ok(jUnit.testCases.includes('Broken is broken on every attempt: error'), jUnit.testCases.join('\n'));
 
             // threads #1, #3, #4 & #6 fail the first time. They're retried (as is every failing thread), but #4 is the only one that passes
             assert.ok(run.output.includes([
@@ -605,6 +677,87 @@ describe('runner (real Cypress)', () => {
 
             assert.equal(run.benchmark.successPercentage, 100);
             assert.equal(run.benchmark.tests.passed, 1);
+        } finally {
+            run.cleanup();
+        }
+    });
+
+    scenario('reports each test once, in its own suite, when tests need different origins', async () => {
+        // each site's tests have their own baseUrl, so Cypress reloads the page and runs the spec file again from the
+        // start whenever the site changes, skipping the tests that already ran
+        const run = await runScenario('reports each test once, in its own suite, when tests need different origins', {
+            phases: [{ specsDir: 'cypress/e2e/origins' }],
+        });
+
+        try {
+            assert.equal(run.exitCode, 0, run.output);
+            assert.deepEqual(run.allureStatistic, { failed: 0, broken: 0, skipped: 0, passed: 6, unknown: 0, total: 6 });
+
+            // no skipped results from the tests Cypress skipped, which Allure would show as retries
+            assert.deepEqual(statuses(run.results), [
+                'Origins first test on site 1: passed',
+                'Origins first test on site 2: passed',
+                'Origins first test on site 3: passed',
+                'Origins second test on site 1: passed',
+                'Origins second test on site 2: passed',
+                'Origins second test on site 3: passed',
+            ]);
+
+            // and none of them are nested inside copies of their suite
+            run.results.forEach((result) => {
+                assert.deepEqual(result.labels.filter((label) => /suite/i.test(label.name)), [{ name: 'parentSuite', value: 'Origins' }], result.name);
+            });
+
+            assert.equal(run.readReportFile('thread-performance-summary.txt'), '6 of 6 tests passed (100%). No tests failed!');
+        } finally {
+            run.cleanup();
+        }
+    });
+
+    scenario('matches results to tests whose titles allure-cypress tidies up', async () => {
+        const run = await runScenario('matches results to tests whose titles allure-cypress tidies up', {
+            phases: [{ specsDir: 'cypress/e2e/titles' }],
+        });
+
+        try {
+            assert.equal(run.exitCode, 0, run.output);
+            assert.deepEqual(run.allureStatistic, { failed: 0, broken: 0, skipped: 0, passed: 4, unknown: 0, total: 4 });
+            assert.deepEqual(statuses(run.results), [
+                'Titles created as a draft: passed',
+                'Titles created as a pending review: passed',
+                'Titles has Allure metadata: passed',
+                'Titles has extra spaces: passed',
+            ]);
+
+            // every result was matched to the test it belongs to, so none are said to be missing
+            assert.equal(threadWarning(run, 1), null);
+            assert.deepEqual(generatedResults(run.results), []);
+            assert.equal(run.readReportFile('thread-performance-summary.txt'), '4 of 4 tests passed (100%). No tests failed!');
+        } finally {
+            run.cleanup();
+        }
+    });
+
+    scenario('discovers tests whose titles use values set in setupNodeEvents', async () => {
+        const run = await runScenario('discovers tests whose titles use values set in setupNodeEvents', {
+            phases: [{ specsDir: 'cypress/e2e/computed-titles' }],
+        });
+
+        try {
+            assert.equal(run.exitCode, 0, run.output);
+            assert.match(run.output, /3 tests found in 1 spec file/);
+            assert.deepEqual(run.allureStatistic, { failed: 0, broken: 0, skipped: 0, passed: 3, unknown: 0, total: 3 });
+            assert.deepEqual(run.results.map((result) => titleOf(result.fullName)).sort(), [
+                'Computed titles first test, set in setupNodeEvents',
+                'Computed titles second test, set in setupNodeEvents',
+                'Computed titles third test, set in setupNodeEvents',
+            ]);
+
+            // the tests that were discovered are the ones Cypress ran, so none are missing a result
+            assert.equal(threadWarning(run, 1), null);
+            assert.doesNotMatch(run.reportHtml, /didn&#39;t produce a result/);
+            assert.equal(run.readReportFile('thread-performance-summary.txt'), '3 of 3 tests passed (100%). No tests failed!');
+            assert.deepEqual(generatedResults(run.results), []);
         } finally {
             run.cleanup();
         }

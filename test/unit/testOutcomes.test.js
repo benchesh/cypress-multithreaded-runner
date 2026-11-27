@@ -129,7 +129,7 @@ describe('resolveThreadOutcomes', () => {
 });
 
 describe('assumedPassedOutcomes', () => {
-    it('records every grep-included test as skipped, as it was not run, but only assumes the ones that are not pending passed', () => {
+    it('records every grep-included test as passed, except pending tests, which are skipped', () => {
         const outcomes = assumedPassedOutcomes(discovery([
             discovered('S a'),
             discovered('S b', { pending: true }),
@@ -137,7 +137,7 @@ describe('assumedPassedOutcomes', () => {
         ]));
 
         assert.deepEqual(outcomes.map((o) => [o.fullTitle, o.status, o.origin, o.assumedPassed]), [
-            ['S a', 'skipped', 'assumed', true],
+            ['S a', 'passed', 'assumed', true],
             ['S b', 'skipped', 'assumed', false],
         ]);
     });
@@ -150,7 +150,7 @@ describe('computeTestStats', () => {
         const stats = computeTestStats([
             outcome('passed'),
             outcome('passed'),
-            outcome('skipped', { origin: 'assumed', assumedPassed: true }),
+            outcome('passed', { origin: 'assumed', assumedPassed: true }),
             outcome('skipped', { origin: 'assumed', assumedPassed: false }),
             outcome('failed'),
             outcome('broken', { origin: 'filled' }),
@@ -160,16 +160,16 @@ describe('computeTestStats', () => {
 
         assert.deepEqual(stats, {
             total: 8,
-            passed: 2,
+            passed: 3,
             failed: 2,
             broken: 1,
-            skipped: 3,
+            skipped: 2,
             unknown: 0,
             notRun: 1,
             filledIn: 2,
             assumedPassed: 1,
-            // 2 passed of 5 (8 tests minus 3 skipped, including the one assumed to have passed previously)
-            successPercentage: 40,
+            // 3 passed of 6 (8 tests minus 2 skipped). The test assumed to have passed previously counts as passed
+            successPercentage: 50,
         });
     });
 

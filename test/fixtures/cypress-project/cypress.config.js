@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { defineConfig } = require('cypress');
 const allureWriter = require('../../../allure/writer');
+const readComputedLabel = require('./cypress/plugins/computedLabel');
 
 module.exports = defineConfig({
     e2e: {
@@ -16,6 +17,10 @@ module.exports = defineConfig({
         trashAssetsBeforeRuns: false,
         setupNodeEvents(on, config) {
             allureWriter(on, config);
+
+            // only known once setupNodeEvents has run, like a value read from a .env file. The titles of the tests in
+            // cypress/e2e/computed-titles include it, so test discovery has to run setupNodeEvents to know them
+            config.expose = { ...config.expose, computedLabel: readComputedLabel() };
 
             on('task', {
                 // how many times it's been called for a key (see cypress/support/runCount.js), including this time

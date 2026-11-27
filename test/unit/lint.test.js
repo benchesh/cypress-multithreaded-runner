@@ -39,6 +39,7 @@ describe('eslint', () => {
             'test/fixtures/cypress-project/cypress.config.js',
             'test/fixtures/cypress-project/cypress/e2e/mixed/broken.cy.js',
             'test/fixtures/cypress-project/cypress/support/runCount.js',
+            'test/fixtures/cypress-project/cypress/plugins/computedLabel.js',
         ].forEach((file) => assert.ok(linted.includes(file), `${file} wasn't linted`));
 
         // generated output isn't ours to lint
