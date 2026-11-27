@@ -170,12 +170,18 @@ describe('runner (real Cypress)', () => {
             assert.equal(run.exitCode, 1, run.output);
             assert.match(run.output, /1 thread will be created/);
 
-            // fail.cy.js: 1 passed + 1 failed. pass.cy.js (2 tests) & flaky.cy.js (1 test) are assumed to have passed
-            assert.deepEqual(run.allureStatistic, { failed: 1, broken: 0, skipped: 0, passed: 4, unknown: 0, total: 5 });
-            assert.equal(run.benchmark.successPercentage, 80);
+            // fail.cy.js: 1 passed + 1 failed. pass.cy.js (2 tests) & flaky.cy.js (1 test) weren't run: they're assumed to have
+            // passed previously, but as they weren't run in this report they're marked as skipped
+            assert.deepEqual(run.allureStatistic, { failed: 1, broken: 0, skipped: 3, passed: 1, unknown: 0, total: 5 });
+            assert.equal(run.benchmark.successPercentage, 50);
             assert.equal(run.benchmark.tests.assumedPassed, 3);
+            assert.equal(run.benchmark.tests.skipped, 3);
             assert.deepEqual(run.benchmark.fails, ['cypress/e2e/failing/fail.cy.js']);
-            assert.match(run.reportHtml, /The other 2 spec files \(3 tests\) weren&#39;t run, and have been added to this report as passed/);
+            assert.match(run.reportHtml, /The other 2 spec files \(3 tests\) weren&#39;t run\. Their tests are assumed to have passed previously, and have been added to this report as skipped/);
+
+            const generated = generatedResults(run.results);
+            assert.deepEqual(generated.map((result) => result.status), ['skipped', 'skipped', 'skipped']);
+            generated.forEach((result) => assert.match(result.statusDetails.message, /This test is therefore assumed to have passed previously and has been marked as skipped in this report\./));
         } finally {
             run.cleanup();
         }

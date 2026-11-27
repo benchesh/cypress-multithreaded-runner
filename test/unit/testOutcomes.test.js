@@ -129,14 +129,17 @@ describe('resolveThreadOutcomes', () => {
 });
 
 describe('assumedPassedOutcomes', () => {
-    it('treats every grep-included test as passed, and pending tests as skipped', () => {
+    it('records every grep-included test as skipped, as it was not run, but only assumes the ones that are not pending passed', () => {
         const outcomes = assumedPassedOutcomes(discovery([
             discovered('S a'),
             discovered('S b', { pending: true }),
             discovered('S c', { grepIncluded: false }),
         ]));
 
-        assert.deepEqual(outcomes.map((o) => [o.fullTitle, o.status, o.origin]), [['S a', 'passed', 'assumed'], ['S b', 'skipped', 'assumed']]);
+        assert.deepEqual(outcomes.map((o) => [o.fullTitle, o.status, o.origin, o.assumedPassed]), [
+            ['S a', 'skipped', 'assumed', true],
+            ['S b', 'skipped', 'assumed', false],
+        ]);
     });
 });
 
@@ -147,7 +150,8 @@ describe('computeTestStats', () => {
         const stats = computeTestStats([
             outcome('passed'),
             outcome('passed'),
-            outcome('passed', { origin: 'assumed' }),
+            outcome('skipped', { origin: 'assumed', assumedPassed: true }),
+            outcome('skipped', { origin: 'assumed', assumedPassed: false }),
             outcome('failed'),
             outcome('broken', { origin: 'filled' }),
             outcome('skipped'),
@@ -155,17 +159,17 @@ describe('computeTestStats', () => {
         ]);
 
         assert.deepEqual(stats, {
-            total: 7,
-            passed: 3,
+            total: 8,
+            passed: 2,
             failed: 2,
             broken: 1,
-            skipped: 1,
+            skipped: 3,
             unknown: 0,
             notRun: 1,
             filledIn: 2,
             assumedPassed: 1,
-            // 3 passed of 6 (7 tests minus 1 intentionally skipped)
-            successPercentage: 50,
+            // 2 passed of 5 (8 tests minus 3 skipped, including the one assumed to have passed previously)
+            successPercentage: 40,
         });
     });
 

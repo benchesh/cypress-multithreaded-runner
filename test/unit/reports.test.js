@@ -171,6 +171,26 @@ describe('buildThreadReport', () => {
         assert.equal(summary, '1 of 1 test passed (100%). No tests failed!');
     });
 
+    it('says that the tests of spec files that were not re-run are assumed to have passed previously, and are marked as skipped', () => {
+        const threads = [thread(1, 1, Outcome.PASSED)];
+        const threadOutcomes = new Map([[1, { tests: [test('passed')] }]]);
+        const outcomes = [test('passed'), test('skipped', { origin: 'assumed', assumedPassed: true }), test('skipped', { origin: 'assumed', assumedPassed: true })];
+        const build = (assumedPassedSpecCount, assumed) => buildThreadReport({
+            threads,
+            threadOutcomes,
+            settings,
+            isPhaseSkipped: () => false,
+            testStats: computeTestStats([outcomes[0], ...assumed]),
+            assumedPassedSpecCount,
+        }).summary;
+
+        assert.equal(
+            build(2, outcomes.slice(1)),
+            "1 of 1 test passed (100%), with 2 skipped. 2 spec files weren't re-run, so their tests are assumed to have passed previously and marked as skipped (2). No tests failed!",
+        );
+        assert.match(build(1, outcomes.slice(1, 2)), /1 spec file wasn't re-run, so its test is assumed to have passed previously and marked as skipped \(1\)\./);
+    });
+
     it('describeFailCounts groups tests by how many times they failed', () => {
         assert.deepEqual(describeFailCounts([0, 1, 1, 3]), ['1 test failed 3 times', '2 tests failed 1 time']);
     });
