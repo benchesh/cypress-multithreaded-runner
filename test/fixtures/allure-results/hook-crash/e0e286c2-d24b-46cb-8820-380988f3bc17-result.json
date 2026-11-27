@@ -1,0 +1,33 @@
+{
+    "uuid": "e0e286c2-d24b-46cb-8820-380988f3bc17",
+    "name": "never runs 1",
+    "historyId": "e634a1d6-eb8c-5940-9631-14c756a106e6",
+    "status": "failed",
+    "statusDetails": {
+        "message": "before hook exploded\n\nBecause this error occurred during a `before all` hook we are skipping the remaining tests in the current suite: `Hook crash` (added by [cypress-allure-adapter])",
+        "trace": "Error: before hook exploded\n    at Context.eval (webpack:///./cypress/e2e/phase2/hook-crash.cy.js:3:14)\n    at runnable.fn (http://localhost:52684/__cypress/runner/cypress_runner.js:146870:19)\n    at callFn (http://localhost:52684/__cypress/runner/cypress_runner.js:166270:21)\n    at Runnable.run (http://localhost:52684/__cypress/runner/cypress_runner.js:166257:7)\n    at <unknown> (http://localhost:52684/__cypress/runner/cypress_runner.js:172362:30)\n    at PassThroughHandlerContext.finallyHandler (http://localhost:52684/__cypress/runner/cypress_runner.js:4045:23)\n    at PassThroughHandlerContext.tryCatcher (http://localhost:52684/__cypress/runner/cypress_runner.js:1780:23)\n    at Promise._settlePromiseFromHandler (http://localhost:52684/__cypress/runner/cypress_runner.js:1492:31)\n    at Promise._settlePromise (http://localhost:52684/__cypress/runner/cypress_runner.js:1549:18)"
+    },
+    "stage": "finished",
+    "steps": [],
+    "attachments": [],
+    "parameters": [],
+    "labels": [
+        {
+            "name": "package",
+            "value": "cypress.e2e.phase2.hook-crash.cy.js"
+        },
+        {
+            "name": "path",
+            "value": "cypress/e2e/phase2/hook-crash.cy.js"
+        },
+        {
+            "name": "parentSuite",
+            "value": "Hook crash"
+        }
+    ],
+    "links": [],
+    "start": 1795720557612,
+    "fullName": "Hook crash never runs 1",
+    "testCaseId": "08ec6beb2b600c06f21fa92622e7d9c9",
+    "stop": 1795720557681
+}

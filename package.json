@@ -3,8 +3,19 @@
   "version": "1.32.0",
   "description": "A lightweight method to run Cypress spec files in multiple threads, with built-in support for Allure report generation",
   "main": "index.js",
+  "files": [
+    "index.js",
+    "async.js",
+    "allure.js",
+    "allure_nofallback.js",
+    "allure/",
+    "lib/"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/unit/*.test.js",
+    "test:integration": "node --test test/integration/*.test.js",
+    "test:all": "npm test && npm run test:integration",
+    "clean:artifacts": "node -e \"require('fs').rmSync('test-artifacts', { recursive: true, force: true })\""
   },
   "author": "Ben Cheshire",
   "peerDependencies": {
@@ -20,13 +31,19 @@
   },
   "dependencies": {
     "@mmisty/cypress-allure-adapter": "^4.0.1",
-    "allure-commandline": "^2.46.1",
-    "allure-cypress": "^3.14.0",
+    "allure-commandline": "^2.46.2",
+    "allure-cypress": "^3.15.0",
+    "esbuild": "^0.28.2",
     "fs-extra": "^11.4.1",
     "junit-report-merger": "^9.0.4",
     "kill-sync": "^1.0.4",
-    "node-html-parser": "^9.0.6",
+    "lodash": "^4.18.1",
+    "node-html-parser": "^9.0.7",
     "node-notifier": "^12.1.0",
     "yargs": "^18.2.0"
+  },
+  "devDependencies": {
+    "@cypress/grep": "^7.0.0",
+    "cypress": "^15.21.1"
   }
 }

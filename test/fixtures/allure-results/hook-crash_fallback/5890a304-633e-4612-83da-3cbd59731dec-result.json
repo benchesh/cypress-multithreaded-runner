@@ -1,0 +1,60 @@
+{
+    "uuid": "5890a304-633e-4612-83da-3cbd59731dec",
+    "name": "never runs 1",
+    "historyId": "697fcfd4b26fb3917f416c82f398d906:d41d8cd98f00b204e9800998ecf8427e",
+    "status": "broken",
+    "statusDetails": {
+        "message": "before hook exploded",
+        "trace": "Error: before hook exploded\n    at Context.eval (webpack:///./cypress/e2e/phase2/hook-crash.cy.js:3:14)\n    at runnable.fn (http://localhost:52684/__cypress/runner/cypress_runner.js:146870:19)\n    at callFn (http://localhost:52684/__cypress/runner/cypress_runner.js:166270:21)\n    at Runnable.run (http://localhost:52684/__cypress/runner/cypress_runner.js:166257:7)\n    at <unknown> (http://localhost:52684/__cypress/runner/cypress_runner.js:172362:30)\n    at PassThroughHandlerContext.finallyHandler (http://localhost:52684/__cypress/runner/cypress_runner.js:4045:23)\n    at PassThroughHandlerContext.tryCatcher (http://localhost:52684/__cypress/runner/cypress_runner.js:1780:23)\n    at Promise._settlePromiseFromHandler (http://localhost:52684/__cypress/runner/cypress_runner.js:1492:31)\n    at Promise._settlePromise (http://localhost:52684/__cypress/runner/cypress_runner.js:1549:18)"
+    },
+    "stage": "finished",
+    "steps": [],
+    "attachments": [],
+    "parameters": [],
+    "labels": [
+        {
+            "name": "language",
+            "value": "javascript"
+        },
+        {
+            "name": "framework",
+            "value": "cypress"
+        },
+        {
+            "name": "parentSuite",
+            "value": "Hook crash"
+        },
+        {
+            "name": "host",
+            "value": "test-host"
+        },
+        {
+            "name": "thread",
+            "value": "pid-91838-worker-main"
+        },
+        {
+            "name": "package",
+            "value": "cypress-multithreaded-runner.test.fixtures.cypress-project.cypress.e2e.phase2.hook-crash.cy.js"
+        },
+        {
+            "name": "_fallbackTestCaseId",
+            "value": "6f90cd03d630bc2a75d97128b7de0dd8"
+        }
+    ],
+    "links": [],
+    "start": 1795720556576,
+    "fullName": "cypress-multithreaded-runner:test/fixtures/cypress-project/cypress/e2e/phase2/hook-crash.cy.js#Hook crash never runs 1",
+    "titlePath": [
+        "cypress-multithreaded-runner",
+        "test",
+        "fixtures",
+        "cypress-project",
+        "cypress",
+        "e2e",
+        "phase2",
+        "hook-crash.cy.js",
+        "Hook crash"
+    ],
+    "testCaseId": "697fcfd4b26fb3917f416c82f398d906",
+    "stop": 1795720556857
+}

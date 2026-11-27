@@ -1,0 +1,72 @@
+Warning: The allowCypressEnv configuration option is enabled. This allows any browser code to read values from Cypress.env(). This is insecure and will be removed in a future major version.
+
+1. Replace Cypress.env() calls with cy.env() (for sensitive values) or Cypress.expose() (for public configuration)
+2. Set allowCypressEnv: false in your Cypress configuration to disable Cypress.env()
+
+Learn more: https://on.cypress.io/cypress-env-migration
+
+[cypress-allure-adapter] v4.0.1
+[cypress-allure-adapter] running on 61017 port
+[cypress-allure-adapter] Failed to start task server: Task server exited unexpectedly: code=1, signal=null
+[cypress-allure-adapter] Allure reporting may be incomplete - continuing without task server
+[cypress-allure-adapter] Task failed for __init__: Task server exited unexpectedly: code=1, signal=null
+
+================================================================================
+
+  (Run Starting)
+
+  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ Cypress:        15.21.1                                                                        │
+  │ Browser:        Electron 138 (headless)                                                        │
+  │ Node Version:   v22.23.4 (/Users/user/.nvm/versions/node/v22.23.4/bin/node)       │
+  │ Specs:          1 found (loops.cy.js)                                                          │
+  │ Searched:       cypress/e2e/phase2/loops.cy.js                                                 │
+  └────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+                                                                                                    
+  Running:  loops.cy.js                                                                     (1 of 1)
+
+
+  Loops
+    ✓ item a (122ms)
+[cypress-allure-adapter] Task failed for __init__: Task server exited unexpectedly: code=1, signal=null
+[cypress-allure-adapter] Task failed for cypress/e2e/phase2/loops.cy.js: Task server exited unexpectedly: code=1, signal=null
+    ✓ item b (12ms)
+    ✓ item c (29ms)
+    ✓ times 0 (15ms)
+    ✓ times 1 (9ms)
+    - is skipped
+
+
+  5 passing (1s)
+  1 pending
+
+
+  (Results)
+
+  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ Tests:        6                                                                                │
+  │ Passing:      5                                                                                │
+  │ Failing:      0                                                                                │
+  │ Pending:      1                                                                                │
+  │ Skipped:      0                                                                                │
+  │ Screenshots:  0                                                                                │
+  │ Video:        false                                                                            │
+  │ Duration:     1 second                                                                         │
+  │ Spec Ran:     loops.cy.js                                                                      │
+  └────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+
+  (Run Finished)
+
+
+       Spec                                              Tests  Passing  Failing  Pending  Skipped  
+  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ ✔  loops.cy.js                              00:01        6        5        -        1        - │
+  └────────────────────────────────────────────────────────────────────────────────────────────────┘
+    ✔  All specs passed!                        00:01        6        5        -        1        -  
+

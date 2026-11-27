@@ -1,0 +1,85 @@
+{
+    "uuid": "7b1e5bf4-1c11-4b7a-a31a-5f58179b603e",
+    "name": "passes on the second attempt",
+    "historyId": "7e2fe645-35ce-5e54-a7dc-b80b6bcd49e6",
+    "status": "passed",
+    "statusDetails": {},
+    "stage": "finished",
+    "steps": [
+        {
+            "name": "\"before each\" hook: [cypress-allure-adapter]",
+            "status": "passed",
+            "statusDetails": {},
+            "stage": "finished",
+            "steps": [
+                {
+                    "name": "will not intercept requests to save bodies",
+                    "status": "passed",
+                    "statusDetails": {},
+                    "stage": "finished",
+                    "steps": [],
+                    "attachments": [],
+                    "parameters": [],
+                    "start": 1795720557208,
+                    "stop": 1795720557208
+                }
+            ],
+            "attachments": [],
+            "parameters": [
+                {
+                    "name": "To access request bodies",
+                    "value": "add environment variable: `allureAddBodiesToRequests`\n(value is requests split by comma that you wish to save, to save all set '*')"
+                },
+                {
+                    "name": "To skip this message",
+                    "value": "add environment variable `allureSkipSteps: '*\\[cypress-allure-adapter\\]*' `"
+                }
+            ],
+            "start": 1795720557372,
+            "stop": 1795720557374
+        },
+        {
+            "name": "assert: expected **2** to be above **1**",
+            "status": "passed",
+            "statusDetails": {},
+            "stage": "finished",
+            "steps": [],
+            "attachments": [],
+            "parameters": [],
+            "start": 1795720557210,
+            "stop": 1795720557210
+        },
+        {
+            "name": "\"after each\" hook: __allure_report_system_hook__",
+            "status": "passed",
+            "statusDetails": {},
+            "stage": "finished",
+            "steps": [],
+            "attachments": [],
+            "parameters": [],
+            "start": 1795720557378,
+            "stop": 1795720557386
+        }
+    ],
+    "attachments": [],
+    "parameters": [],
+    "labels": [
+        {
+            "name": "package",
+            "value": "cypress.e2e.phase1.flaky.cy.js"
+        },
+        {
+            "name": "path",
+            "value": "cypress/e2e/phase1/flaky.cy.js"
+        },
+        {
+            "name": "parentSuite",
+            "value": "Flaky suite"
+        }
+    ],
+    "links": [],
+    "start": 1795720557353,
+    "fullName": "Flaky suite passes on the second attempt",
+    "testCaseId": "7a0f5e3354ac80689d7cb6d454cf7393",
+    "stop": 1795720557667
+}

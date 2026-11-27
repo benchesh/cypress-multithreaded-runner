@@ -1,0 +1,89 @@
+{
+    "uuid": "0cd2519d-9d9d-41c5-b53e-5baa684e82c2",
+    "name": "passes nested",
+    "historyId": "37c17fdc-781b-5fde-a08f-17d4a8cae0d7",
+    "status": "passed",
+    "statusDetails": {},
+    "stage": "finished",
+    "steps": [
+        {
+            "name": "\"before each\" hook: [cypress-allure-adapter]",
+            "status": "passed",
+            "statusDetails": {},
+            "stage": "finished",
+            "steps": [
+                {
+                    "name": "will not intercept requests to save bodies",
+                    "status": "passed",
+                    "statusDetails": {},
+                    "stage": "finished",
+                    "steps": [],
+                    "attachments": [],
+                    "parameters": [],
+                    "start": 1795720557292,
+                    "stop": 1795720557292
+                }
+            ],
+            "attachments": [],
+            "parameters": [
+                {
+                    "name": "To access request bodies",
+                    "value": "add environment variable: `allureAddBodiesToRequests`\n(value is requests split by comma that you wish to save, to save all set '*')"
+                },
+                {
+                    "name": "To skip this message",
+                    "value": "add environment variable `allureSkipSteps: '*\\[cypress-allure-adapter\\]*' `"
+                }
+            ],
+            "start": 1795720557918,
+            "stop": 1795720557919
+        },
+        {
+            "name": "assert: expected **true** to equal **true**",
+            "status": "passed",
+            "statusDetails": {},
+            "stage": "finished",
+            "steps": [],
+            "attachments": [],
+            "parameters": [],
+            "start": 1795720557294,
+            "stop": 1795720557294
+        },
+        {
+            "name": "\"after each\" hook: __allure_report_system_hook__",
+            "status": "passed",
+            "statusDetails": {},
+            "stage": "finished",
+            "steps": [],
+            "attachments": [],
+            "parameters": [],
+            "start": 1795720557920,
+            "stop": 1795720557920
+        }
+    ],
+    "attachments": [],
+    "parameters": [],
+    "labels": [
+        {
+            "name": "package",
+            "value": "cypress.e2e.phase1.pass.cy.js"
+        },
+        {
+            "name": "path",
+            "value": "cypress/e2e/phase1/pass.cy.js"
+        },
+        {
+            "name": "parentSuite",
+            "value": "Passing suite"
+        },
+        {
+            "name": "suite",
+            "value": "nested"
+        }
+    ],
+    "links": [],
+    "start": 1795720557915,
+    "fullName": "Passing suite nested passes nested",
+    "testCaseId": "4c248d2a16c550ddfcd9191a7063bdcc",
+    "stop": 1795720557938
+}

@@ -1,0 +1,162 @@
+.cmr-content {
+    overflow-wrap: anywhere;
+    outline: 2px solid #343434;
+    position: relative;
+    z-index: 10;
+    line-height: 16px;
+}
+
+.cmr-footer h2 {
+    margin-bottom: 0;
+}
+                
+.cmr-content h2 {
+    margin-top: 0;
+}
+
+.cmr-header h2 {
+    margin: 0;
+    display: inline-block;
+}
+
+.cmr-thread-log-divide {
+    padding: 0!important;
+    min-width: 1px!important;
+    background: grey!important;
+}
+                
+.cmr-content pre {
+    overflow-wrap: break-word;
+}
+
+#cmr-collapse {
+    padding-right: 10px;
+}
+
+.cmr-headline h2 {
+    cursor: pointer;
+    display: inline;
+}
+                
+.cmr-content div {
+    padding: 20px;
+    background: white;
+}
+
+#cmr-take-screenshot {
+    position: absolute;
+    right: 0px;
+    padding: 5px 10px;
+    font-size: 16px;
+    background: rgba(0, 0, 0, 0.6);
+    filter: drop-shadow(white 0px 0px 0px);
+    border: 0px;
+    display: none;
+    color: white;
+    z-index: 100;
+}
+
+.cmr-content > *,.cmr-all-logs > * {
+    outline: 1px solid #343434;
+}
+
+.cmr-hidden {
+    display: none;
+}
+
+.cmr-content a {
+    color: mediumblue;
+}
+
+.cmr-thread-pre {
+    display: flex;
+    padding: 0!important;
+    gap: 20px;
+}
+
+.cmr-thread-pre pre {
+    margin: 0;
+}
+                
+.cmr-content div.cmr-error {
+    background: #fd5a3e;
+}
+                
+.cmr-content div.cmr-warn {
+    background: #ffbe11;
+}
+                
+.cmr-content div.cmr-success {
+    background: #97cc64;
+}
+
+.cmr-content div.cmr-custom {
+    background:rgb(88, 169, 250);
+}
+
+.cmr-content div.cmr-notes {
+    background: #aaa;
+}
+                
+.cmr-content .cmr-pre-heading {
+    cursor: pointer;
+}
+
+.cmr-content .cmr-sticky {
+    display: flex;
+    gap: 10px;
+    position: sticky;
+    top: 0;
+    margin-left: -1px;
+    padding-left: 1px;
+    background: inherit;
+}
+
+.cmr-content button {
+    background: rgb(239, 239, 239);
+    border: 1px solid grey;
+    padding: 5px;
+    border-radius: 6px;
+}
+
+[data-theme="dark"] .cmr-content #cmr-pre-content,
+[data-theme="dark"] .cmr-content #cmr-pre-content *,
+[data-theme="dark"] .cmr-report {
+    background:rgb(27, 33, 41);
+    color: rgba(246, 250, 254, 0.96);
+}
+
+.cmr-content,.cmr-content button {
+font-family: Helvetica, Arial, sans-serif;
+    color:black;
+}
+
+.cmr-content h2 {
+font-size:21px;
+font-weight:700;
+    line-height: 26px;
+}
+
+.cmr-content pre {
+    font-family: monospace, serif;
+    font-weight: 500;
+    font-size: 14px;
+    line-height: 18px;
+}
+
+.cmr-report pre {
+    margin-block: 1em 1em;
+}
+
+.cmr-report-buttons {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.cmr-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+    user-select: none;
+}

@@ -1,0 +1,84 @@
+{
+    "uuid": "58257d84-8c01-4d9f-9334-d5ec292c2d1e",
+    "name": "passes on the second attempt",
+    "historyId": "ec42ebe670dd405aa53dc89c02bbb372:d41d8cd98f00b204e9800998ecf8427e",
+    "status": "passed",
+    "statusDetails": {},
+    "stage": "finished",
+    "steps": [
+        {
+            "status": "passed",
+            "statusDetails": {},
+            "stage": "finished",
+            "steps": [],
+            "attachments": [],
+            "parameters": [
+                {
+                    "name": "actual",
+                    "value": "2"
+                },
+                {
+                    "name": "expected",
+                    "value": "1"
+                }
+            ],
+            "start": 1795720557210,
+            "name": "assert expected 2 to be above 1",
+            "stop": 1795720557209
+        }
+    ],
+    "attachments": [],
+    "parameters": [
+        {
+            "name": "Retry",
+            "value": "1",
+            "excluded": true
+        }
+    ],
+    "labels": [
+        {
+            "name": "language",
+            "value": "javascript"
+        },
+        {
+            "name": "framework",
+            "value": "cypress"
+        },
+        {
+            "name": "parentSuite",
+            "value": "Flaky suite"
+        },
+        {
+            "name": "host",
+            "value": "test-host"
+        },
+        {
+            "name": "thread",
+            "value": "pid-91834-worker-main"
+        },
+        {
+            "name": "package",
+            "value": "cypress-multithreaded-runner.test.fixtures.cypress-project.cypress.e2e.phase1.flaky.cy.js"
+        },
+        {
+            "name": "_fallbackTestCaseId",
+            "value": "4639ab84c17a03f660067c5e3d4523c2"
+        }
+    ],
+    "links": [],
+    "start": 1795720557121,
+    "fullName": "cypress-multithreaded-runner:test/fixtures/cypress-project/cypress/e2e/phase1/flaky.cy.js#Flaky suite passes on the second attempt",
+    "titlePath": [
+        "cypress-multithreaded-runner",
+        "test",
+        "fixtures",
+        "cypress-project",
+        "cypress",
+        "e2e",
+        "phase1",
+        "flaky.cy.js",
+        "Flaky suite"
+    ],
+    "testCaseId": "ec42ebe670dd405aa53dc89c02bbb372",
+    "stop": 1795720557209
+}

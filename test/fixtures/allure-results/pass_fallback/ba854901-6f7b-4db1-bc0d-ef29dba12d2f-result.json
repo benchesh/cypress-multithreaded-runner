@@ -1,0 +1,83 @@
+{
+    "uuid": "ba854901-6f7b-4db1-bc0d-ef29dba12d2f",
+    "name": "passes nested",
+    "historyId": "beb8f46504cd801b0c62b3463990dad3:d41d8cd98f00b204e9800998ecf8427e",
+    "status": "passed",
+    "statusDetails": {},
+    "stage": "finished",
+    "steps": [
+        {
+            "status": "passed",
+            "statusDetails": {},
+            "stage": "finished",
+            "steps": [],
+            "attachments": [],
+            "parameters": [
+                {
+                    "name": "actual",
+                    "value": "true"
+                },
+                {
+                    "name": "expected",
+                    "value": "true"
+                }
+            ],
+            "start": 1795720557294,
+            "name": "assert expected true to equal true",
+            "stop": 1795720557294
+        }
+    ],
+    "attachments": [],
+    "parameters": [],
+    "labels": [
+        {
+            "name": "language",
+            "value": "javascript"
+        },
+        {
+            "name": "framework",
+            "value": "cypress"
+        },
+        {
+            "name": "parentSuite",
+            "value": "Passing suite"
+        },
+        {
+            "name": "suite",
+            "value": "nested"
+        },
+        {
+            "name": "host",
+            "value": "test-host"
+        },
+        {
+            "name": "thread",
+            "value": "pid-91837-worker-main"
+        },
+        {
+            "name": "package",
+            "value": "cypress-multithreaded-runner.test.fixtures.cypress-project.cypress.e2e.phase1.pass.cy.js"
+        },
+        {
+            "name": "_fallbackTestCaseId",
+            "value": "4ef22b5d0227582a7d34dc30d0950bc5"
+        }
+    ],
+    "links": [],
+    "start": 1795720557188,
+    "fullName": "cypress-multithreaded-runner:test/fixtures/cypress-project/cypress/e2e/phase1/pass.cy.js#Passing suite nested passes nested",
+    "titlePath": [
+        "cypress-multithreaded-runner",
+        "test",
+        "fixtures",
+        "cypress-project",
+        "cypress",
+        "e2e",
+        "phase1",
+        "pass.cy.js",
+        "Passing suite",
+        "nested"
+    ],
+    "testCaseId": "beb8f46504cd801b0c62b3463990dad3",
+    "stop": 1795720557294
+}
