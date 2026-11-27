@@ -1,18 +1,25 @@
-// A test marks itself as broken (rather than failed) with the Allure adapter's API, e.g. when the problem
-// is with the test environment rather than the application under test
+// allure-cypress records a test as broken, rather than failed, when it ends with an error that isn't an
+// assertion error. That's how a problem with the test environment (as opposed to the application under
+// test) shows up
+
+import { visitTestDomain } from '../../support/testDomain';
+
 const breakTest = (message) => {
-    cy.allure().testStatus('broken', { message });
     cy.then(() => {
         throw new Error(message);
     });
 };
 
-describe('Broken', () => {
+describe('Broken', { retries: { runMode: 3 } }, () => {
+    beforeEach(() => {
+        visitTestDomain();
+    });
+
     it('is broken by an unavailable environment', () => {
         breakTest('the test environment was unavailable');
     });
 
-    it('is broken on every attempt', { retries: { runMode: 3 } }, () => {
+    it('is broken on every attempt', () => {
         breakTest('the test environment is still unavailable');
     });
 

@@ -42,7 +42,7 @@ const runScenario = (name, config, { sync = false, historyDir } = {}) => new Pro
 
     const child = spawn(process.execPath, ['-e', script], {
         cwd: FIXTURE_PROJECT,
-        env: { ...process.env, NO_COLOR: '1' },
+        env: { ...process.env, NO_COLOR: '1', CMR_SCREENSHOTS_DIR: temp.file('screenshots') },
     });
 
     let output = '';

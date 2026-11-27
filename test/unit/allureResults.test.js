@@ -122,6 +122,22 @@ describe('AllureResultsStore', () => {
         assert.equal(store.findCrashLogs(thread), null);
     });
 
+    it('detects crash messages using the crashPatterns it is given instead of the defaults', () => {
+        const storeWith = (crashPatterns) => new AllureResultsStore({ allureResultsDir: path.join(temp.dir, 'allure-results'), cwd: temp.dir, crashPatterns });
+
+        // the allure-cypress results of a crashed thread don't contain any of the default patterns, but they do contain the error
+        copyFixture('hook-crash_fallback', '1_fallback');
+        assert.equal(store.findCrashLogs(thread), null);
+        assert.match(storeWith(['BEFORE HOOK EXPLODED']).findCrashLogs(thread), /1_fallback[/\\][^/\\]+-result\.json$/);
+
+        // replacing the patterns means the defaults no longer count
+        store.clear(thread);
+        copyFixture('hook-crash', '1');
+        assert.match(store.findCrashLogs(thread), /1[/\\][^/\\]+-result\.json$/);
+        assert.equal(storeWith(['not in these results']).findCrashLogs(thread), null);
+        assert.equal(storeWith([]).findCrashLogs(thread), null);
+    });
+
     it('writes results for tests that did not produce one', () => {
         const test = { titlePath: ['Suite', 'Nested', 'Deeper', 'Deepest'], title: 'missing', fullTitle: 'Suite Nested Deeper Deepest missing', tags: ['@smoke'] };
 

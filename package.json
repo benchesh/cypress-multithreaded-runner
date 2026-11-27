@@ -7,19 +7,19 @@
     "index.js",
     "async.js",
     "allure.js",
-    "allure_nofallback.js",
     "allure/",
     "lib/"
   ],
   "scripts": {
+    "lint": "eslint .",
     "test": "node --test test/unit/*.test.js",
     "test:integration": "node --test test/integration/*.test.js",
-    "test:all": "npm test && npm run test:integration",
+    "test:all": "npm run lint && npm test && npm run test:integration",
     "clean:artifacts": "node -e \"require('fs').rmSync('test-artifacts', { recursive: true, force: true })\""
   },
   "author": "Ben Cheshire",
   "peerDependencies": {
-    "cypress": ">=12"
+    "cypress": ">=15"
   },
   "engines": {
     "node": ">=20"
@@ -30,9 +30,8 @@
     "url": "git+https://github.com/benchesh/cypress-multithreaded-runner.git"
   },
   "dependencies": {
-    "@mmisty/cypress-allure-adapter": "^4.0.1",
+    "@benchesh/allure-cypress": "^3.15.0-retries.1",
     "allure-commandline": "^2.46.2",
-    "allure-cypress": "^3.15.0",
     "esbuild": "^0.28.2",
     "fs-extra": "^11.4.1",
     "junit-report-merger": "^9.0.4",
@@ -44,6 +43,9 @@
   },
   "devDependencies": {
     "@cypress/grep": "^7.0.0",
-    "cypress": "^15.21.1"
+    "@eslint/js": "^10.0.1",
+    "cypress": "^16.4.0",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0"
   }
 }

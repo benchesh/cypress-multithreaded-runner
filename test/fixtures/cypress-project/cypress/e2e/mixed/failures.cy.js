@@ -1,5 +1,12 @@
-// The Allure adapter records every one of these as failed (including the thrown error)
-describe('Failures', () => {
+// Assertion errors are recorded as failed. The thrown error isn't an assertion error, so it's recorded as broken
+
+import { visitTestDomain } from '../../support/testDomain';
+
+describe('Failures', { retries: { runMode: 3 } }, () => {
+    beforeEach(() => {
+        visitTestDomain();
+    });
+
     it('fails an expect assertion', () => {
         expect(1).to.equal(2);
     });

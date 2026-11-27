@@ -6,7 +6,7 @@ const { runWithRetries } = require('../../lib/threads/runWithRetries');
 const { LogPrinter } = require('../../lib/threads/LogPrinter');
 const { Thread, Outcome } = require('../../lib/threads/Thread');
 const { normaliseSettings } = require('../../lib/config/settings');
-const { createFakeFactory, scripts } = require('../helpers/fakeCypress');
+const { createFakeFactory, scripts, OUTPUT } = require('../helpers/fakeCypress');
 const { createTempDir } = require('../helpers/tempDir');
 
 const createThreads = (phaseNos) => phaseNos.map((phaseNo, index) => new Thread({ threadNo: index + 1, phase: { phaseNo }, spec: `spec${index + 1}.cy.js` }));
@@ -118,6 +118,42 @@ describe('ThreadPool', () => {
         assert.equal(fake.spawnsFor(1), 2);
         assert.equal(warnings[0], 'Illegal log detected in Allure result file "/results/1/abc-result.json" for thread #1');
         assert.match(threads[0].logsTimestamped.map(([, log]) => log).join(''), /Illegal log detected in Allure result file/);
+    });
+
+    it('restarts a thread when its output contains one of the crashPatterns', async () => {
+        const threads = createThreads([1]);
+        const { pool, fake, warnings } = createPool({
+            behaviour: (thread, spawnCount) => (spawnCount === 0
+                ? [{ output: OUTPUT.start }, { output: 'FATAL: the disk is full\n' }, { hang: true }]
+                : scripts.pass()),
+            config: { crashPatterns: ['The Disk Is Full'] },
+            phaseCount: 1,
+        });
+
+        await pool.run(threads);
+
+        assert.equal(threads[0].outcome, Outcome.PASSED);
+        assert.equal(threads[0].restarts, 1);
+        assert.equal(fake.spawnsFor(1), 2);
+        assert.match(warnings[0], /Internal Cypress error in thread #1! Restarting it/);
+    });
+
+    it('does not treat the default crash patterns as crashes once crashPatterns replaces them', async () => {
+        const threads = createThreads([1]);
+
+        // Cypress prints a message that's normally a crash, but still finishes its run
+        const { pool, fake, warnings } = createPool({
+            behaviour: () => [{ output: OUTPUT.start }, { output: OUTPUT.crash }, { output: OUTPUT.fail }],
+            config: { crashPatterns: ['the disk is full'] },
+            phaseCount: 1,
+        });
+
+        await pool.run(threads);
+
+        assert.equal(threads[0].outcome, Outcome.FAILED);
+        assert.equal(threads[0].restarts, 0);
+        assert.equal(fake.spawnsFor(1), 1);
+        assert.deepEqual(warnings, []);
     });
 
     it('gives up after maxThreadRestarts restarts', async () => {
@@ -305,9 +341,13 @@ describe('runWithRetries', () => {
         // first run: #1 fails, #2 has no spec files, #3 (phase 2) never runs
         await runWithRetries({ pool, threads, retries: 1, retryDelay: 0, log: (msg) => logs.push(msg) });
 
-        assert.match(logs[0], /Thread #1[^#]*Thread #3/);
+        // #3 is retried because it was stopped, not because it failed
+        assert.ok(logs[0].includes('1 thread failed and 1 thread was stopped because a thread in an earlier phase failed. Retry attempt 1 of 1 will begin:\nThread #1: "spec1.cy.js"\nThread #3: "spec3.cy.js" (didn\'t run)\n'), logs[0]);
         assert.deepEqual(outcomes(threads), [Outcome.PASSED, Outcome.NO_SPECS, Outcome.PASSED]);
         assert.deepEqual(threads.map((thread) => thread.attempts), [2, 1, 2]);
+        assert.deepEqual(threads.map((thread) => thread.previousAttempts), [[{ outcome: Outcome.FAILED, restarts: 0 }], [], [{ outcome: Outcome.NOT_RUN, restarts: 0 }]]);
+        assert.deepEqual(threads[0].attemptHistory, [{ outcome: Outcome.FAILED, restarts: 0 }, { outcome: Outcome.PASSED, restarts: 0 }]);
+        assert.deepEqual(threads.map((thread) => thread.retryReasons), [{ failed: 1, stopped: 0 }, { failed: 0, stopped: 0 }, { failed: 0, stopped: 1 }]);
     });
 
     it('does nothing more when everything passes', async () => {

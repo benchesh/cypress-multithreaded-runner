@@ -31,17 +31,21 @@ const listArtifacts = () => {
     const found = [];
 
     const walk = (dir, depth) => {
-        if (!fs.existsSync(dir)) {
-            return;
-        }
+        // test files run in parallel processes, each replacing its own artefacts, so any directory
+        // can disappear (or be half written) while this is walking it
+        try {
+            const marker = fs.readJsonSync(path.join(dir, MARKER_FILE), { throws: false });
 
-        if (fs.existsSync(path.join(dir, MARKER_FILE))) {
-            found.push({ dir, ...fs.readJsonSync(path.join(dir, MARKER_FILE), { throws: false }) });
-            return;
-        }
+            if (marker) {
+                found.push({ dir, ...marker });
+                return;
+            }
 
-        if (depth < 4) {
-            fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).forEach((entry) => walk(path.join(dir, entry.name), depth + 1));
+            if (depth < 4) {
+                fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).forEach((entry) => walk(path.join(dir, entry.name), depth + 1));
+            }
+        } catch {
+            // skipped, the next test file to save will list it
         }
     };
 
@@ -98,7 +102,13 @@ ${rows.join('\n')}
 
 const mark = (location, dest) => {
     fs.writeJsonSync(path.join(dest, MARKER_FILE), { ...location, savedAt: new Date().toISOString() });
-    writeIndex();
+
+    try {
+        writeIndex();
+    } catch {
+        // the index is a convenience, so a clash with another test file saving at the same time must never fail a test
+    }
+
     return dest;
 };
 

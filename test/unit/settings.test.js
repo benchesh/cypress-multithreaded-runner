@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const { parseCliArgs } = require('../../lib/config/cliArgs');
 const { mergeCliOverrides, normaliseSettings } = require('../../lib/config/settings');
+const { DEFAULT_CRASH_PATTERNS } = require('../../lib/cypress/crashPatterns');
 
 const argv = (...args) => ['node', 'script.js', ...args];
 
@@ -24,6 +25,12 @@ describe('parseCliArgs', () => {
     it('resolves the runFailedSpecFilesFromReportURL & runMostRecentlyFailedSpecFilesFromReportsDir aliases', () => {
         assert.equal(parseCliArgs(argv('--run-fails-from-url', 'http://x')).runFailedSpecFilesFromReportURL, 'http://x');
         assert.equal(parseCliArgs(argv('--run-recently-failed-from-reports-dir', 'dir')).runMostRecentlyFailedSpecFilesFromReportsDir, 'dir');
+    });
+
+    it('parses crashPatterns as a list of strings, even when they look like numbers', () => {
+        assert.deepEqual(parseCliArgs(argv('--crash-patterns', 'Out of memory', '404')).crashPatterns, ['Out of memory', '404']);
+        assert.deepEqual(parseCliArgs(argv('--crashPatterns=Boom')).crashPatterns, ['Boom']);
+        assert.deepEqual(parseCliArgs(argv('--crash-patterns')).crashPatterns, []);
     });
 
     it('parses numbers and dotted options', () => {
@@ -68,6 +75,7 @@ describe('normaliseSettings', () => {
         assert.equal(settings.overwriteAllureHistory, true);
         assert.equal(settings.logMode, 1);
         assert.equal(settings.maxThreadRestarts, 5);
+        assert.deepEqual(settings.crashPatterns, DEFAULT_CRASH_PATTERNS);
         assert.equal(settings.notify, true);
         assert.equal(settings.threadDelay, 30);
         assert.equal(settings.stopSubsequentPhasesOnFail, true);
@@ -124,6 +132,25 @@ describe('normaliseSettings', () => {
 
         assert.deepEqual(phase.textFilters.includingAny, ['abc']);
         assert.equal(phase.textFilters.notIncludingAny, null);
+    });
+
+    it('lets crashPatterns replace the default crash patterns, lowercasing them and dropping blank ones', () => {
+        const patterns = (crashPatterns) => normaliseSettings({ crashPatterns }).crashPatterns;
+
+        assert.deepEqual(patterns(['Out Of Memory', 'Boom']), ['out of memory', 'boom']);
+        assert.deepEqual(patterns('Boom'), ['boom']);
+        assert.deepEqual(patterns(['Boom', '', '   ', null, {}, 404]), ['boom', '404']);
+
+        // an empty list switches the patterns off. It doesn't fall back to the defaults
+        assert.deepEqual(patterns([]), []);
+
+        // anything else is ignored. A blank pattern must never be used, as it would match every line of output
+        [undefined, null, 5, {}, true].forEach((value) => assert.deepEqual(patterns(value), DEFAULT_CRASH_PATTERNS, String(value)));
+        assert.deepEqual(patterns(['', '  ']), []);
+
+        // the defaults can't be changed through the settings
+        patterns(undefined).push('oops');
+        assert.ok(!DEFAULT_CRASH_PATTERNS.includes('oops'));
     });
 
     it('fills in waitForFileExist defaults', () => {

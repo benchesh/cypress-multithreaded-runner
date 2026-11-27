@@ -1,4 +1,10 @@
-describe('Skipped', () => {
+import { visitTestDomain } from '../../support/testDomain';
+
+describe('Skipped', { retries: { runMode: 3 } }, () => {
+    beforeEach(() => {
+        visitTestDomain();
+    });
+
     it.skip('is skipped with it.skip', () => {});
 
     xit('is skipped with xit', () => {});

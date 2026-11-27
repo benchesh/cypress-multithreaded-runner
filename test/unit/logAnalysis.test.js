@@ -12,6 +12,7 @@ const {
     parseRetriedTests,
     CrashDetector,
 } = require('../../lib/cypress/logAnalysis');
+const { DEFAULT_CRASH_PATTERNS } = require('../../lib/cypress/crashPatterns');
 
 // real Cypress 15 output, captured from the fixture project
 const output = (name) => fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'cypress-output', `${name}.log`), 'utf8');
@@ -34,6 +35,22 @@ describe('logAnalysis (real Cypress output)', () => {
         assert.equal(containsCrashPattern(output('hook-crash')), true);
         assert.equal(containsCrashPattern(output('pass')), false);
         assert.equal(containsCrashPattern(output('fail')), false);
+    });
+
+    it('detects crashes using the patterns it is given instead of the defaults', () => {
+        // the default patterns no longer count once they've been replaced
+        assert.equal(containsCrashPattern(output('hook-crash'), ['some other message']), false);
+        assert.equal(containsCrashPattern(output('hook-crash'), []), false);
+
+        // matching is case-insensitive
+        assert.equal(containsCrashPattern(output('hook-crash'), ['BEFORE HOOK EXPLODED']), true);
+        assert.equal(containsCrashPattern('The disk is Full', ['disk is full']), true);
+        assert.equal(containsCrashPattern(output('pass'), ['before hook exploded']), false);
+    });
+
+    it('has defaults that are lowercase, as matching lowercases the output rather than each pattern', () => {
+        assert.ok(DEFAULT_CRASH_PATTERNS.length > 0);
+        DEFAULT_CRASH_PATTERNS.forEach((pattern) => assert.equal(pattern, pattern.toLowerCase()));
     });
 
     it('parses the results table', () => {
@@ -64,5 +81,20 @@ describe('CrashDetector', () => {
     it('ignores normal output', () => {
         const detector = new CrashDetector();
         output('pass').match(/.{1,50}/gs).forEach((chunk) => assert.equal(detector.push(chunk), false));
+    });
+
+    it('detects custom patterns split across chunks, and no longer detects the defaults', () => {
+        const detector = new CrashDetector(['Out of Memory']);
+
+        assert.equal(detector.push('Because this error occurred during a `before all` hook we are skipping'), false);
+        assert.equal(detector.push('FATAL: out of mem'), false);
+        assert.equal(detector.push('ory!'), true);
+    });
+
+    it('never detects anything when there are no patterns, and keeps no output in memory', () => {
+        const detector = new CrashDetector([]);
+
+        assert.equal(detector.push(output('hook-crash')), false);
+        assert.equal(detector.tail, '');
     });
 });

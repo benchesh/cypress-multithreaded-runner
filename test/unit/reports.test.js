@@ -60,7 +60,7 @@ describe('buildThreadReport', () => {
 
         assert.deepEqual(entries.get(2).heading, [
             'Thread #2 [spec2.cy.js]',
-            'WARNING: 1 test failed at least 2 times and the thread needed restarting 1 time',
+            'WARNING: 1 test failed 2 times and the thread needed restarting 1 time',
         ]);
         assert.equal(entries.get(4).heading[1], 'CRITICAL ERROR: Thread did not complete as it went over the time limit of 1 minute');
         assert.match(entries.get(4).heading[2], /1 test didn't produce a result, so it has been added to the Allure report as broken/);
@@ -84,6 +84,78 @@ describe('buildThreadReport', () => {
         });
     });
 
+    it('describes each attempt of a retried thread separately', () => {
+        const retried = (threadNo, phaseNo, previousAttempts, extra = {}) => thread(threadNo, phaseNo, Outcome.PASSED, { previousAttempts, attempts: previousAttempts.length + 1, ...extra });
+
+        const threads = [
+            // crashed once and failed, then passed when retried
+            retried(1, 1, [{ outcome: Outcome.FAILED, restarts: 1 }]),
+            // phase 2 didn't run because thread #1 failed, so was retried with it
+            retried(2, 2, [{ outcome: Outcome.NOT_RUN, restarts: 0 }]),
+            // then this one failed in the retry, so was retried again, needing restarting this time
+            retried(3, 2, [{ outcome: Outcome.NOT_RUN, restarts: 0 }, { outcome: Outcome.FAILED, restarts: 0 }], { restarts: 2 }),
+            // never retried, so nothing changes
+            thread(4, 1, Outcome.PASSED),
+        ];
+
+        const threadOutcomes = new Map([
+            [1, { tests: [test('passed', { failedAttempts: 3, failedAttemptsByThreadAttempt: [2, 1] }), test('passed', { failedAttemptsByThreadAttempt: [1, 0] })] }],
+            [2, { tests: [test('passed', { failedAttemptsByThreadAttempt: [0, 0] })] }],
+            [3, { tests: [test('passed', { failedAttempts: 1, failedAttemptsByThreadAttempt: [0, 1, 0] })] }],
+            [4, { tests: [test('passed', { failedAttempts: 1, failedAttemptsByThreadAttempt: [1] })] }],
+        ]);
+
+        const { entries, summary } = buildThreadReport({
+            threads,
+            threadOutcomes,
+            settings,
+            isPhaseSkipped: () => false,
+            testStats: computeTestStats([...threadOutcomes.values()].flatMap((o) => o.tests)),
+        });
+
+        // (entries are in phase order, so they're looked up by thread number)
+        assert.deepEqual([1, 2, 3, 4].map((threadNo) => entries.get(threadNo).status), ['warn', 'warn', 'warn', 'warn']);
+        assert.deepEqual([1, 2, 3, 4].map((threadNo) => entries.get(threadNo).heading), [
+            [
+                'Thread #1 [spec1.cy.js] (2 attempts)',
+                'WARNING: In the first attempt: 1 test failed 2 times, 1 test failed 1 time, the thread needed restarting 1 time and the spec file failed. In the second attempt: 1 test failed 1 time and the spec file passed',
+            ],
+            [
+                'Thread #2 [spec2.cy.js] (2 attempts)',
+                'WARNING: In the first attempt: the thread didn\'t run because a thread in an earlier phase failed. In the second attempt: the spec file passed',
+            ],
+            [
+                'Thread #3 [spec3.cy.js] (3 attempts)',
+                'WARNING: In the first attempt: the thread didn\'t run because a thread in an earlier phase failed. In the second attempt: 1 test failed 1 time and the spec file failed. In the third attempt: the thread needed restarting 2 times and the spec file passed',
+            ],
+            ['Thread #4 [spec4.cy.js]', 'WARNING: 1 test failed 1 time'],
+        ]);
+        assert.match(summary, /2 threads failed and had to be retried\. 2 threads were retried because a thread in an earlier phase failed/);
+    });
+
+    it('describes the attempts of a thread that never recovered, followed by the tests that were filled in', () => {
+        const crashed = thread(1, 1, Outcome.CRASHED, {
+            previousAttempts: [{ outcome: Outcome.TIMED_OUT, restarts: 0 }],
+            attempts: 2,
+            restarts: 6,
+            hasResults: false,
+        });
+
+        const { entries } = buildThreadReport({
+            threads: [crashed],
+            threadOutcomes: new Map([[1, { tests: [test('broken', { origin: 'filled' }), test('broken', { origin: 'filled' })] }]]),
+            settings,
+            isPhaseSkipped: () => false,
+            testStats: computeTestStats([]),
+        });
+
+        assert.deepEqual(entries.get(1).heading, [
+            'Thread #1 [spec1.cy.js] (2 attempts)',
+            'CRITICAL ERROR: Thread did not complete!',
+            'WARNING: In the first attempt: the thread went over the time limit of 1 minute. In the second attempt: the thread crashed 6 times, never recovering. 2 tests didn\'t produce a result, so they have been added to the Allure report as broken',
+        ]);
+    });
+
     it('reports "No tests failed!" when everything passed', () => {
         const threads = [thread(1, 1, Outcome.PASSED)];
         const threadOutcomes = new Map([[1, { tests: [test('passed')] }]]);
@@ -100,7 +172,7 @@ describe('buildThreadReport', () => {
     });
 
     it('describeFailCounts groups tests by how many times they failed', () => {
-        assert.deepEqual(describeFailCounts([0, 1, 1, 3]), ['1 test failed at least 3 times', '2 tests failed at least 1 time']);
+        assert.deepEqual(describeFailCounts([0, 1, 1, 3]), ['1 test failed 3 times', '2 tests failed 1 time']);
     });
 });
 

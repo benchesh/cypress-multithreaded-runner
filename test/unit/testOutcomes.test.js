@@ -48,9 +48,31 @@ describe('resolveThreadOutcomes', () => {
             ['S test', 'passed', 2, 50],
         ]);
 
+        thread.attempts = 2;
+
         const { tests } = resolveThreadOutcomes(thread, discovery([discovered('S test')]), settings);
 
         assert.deepEqual(tests.map((t) => [t.status, t.failedAttempts]), [['passed', 1]]);
+    });
+
+    it('counts failed results separately for each attempt of the thread (retryAllFailedSpecs)', () => {
+        const thread = createThread(Outcome.FAILED, [
+            ['S flaky', 'failed', 1, 1],
+            ['S flaky', 'failed', 1, 2],
+            ['S flaky', 'passed', 1, 3],
+            ['S broken', 'broken', 1, 4],
+            ['S flaky', 'failed', 3, 5],
+            ['S flaky', 'passed', 3, 6],
+            ['S broken', 'broken', 3, 7],
+        ]);
+        thread.attempts = 3; // the 2nd attempt didn't produce any results (e.g. its phase was stopped)
+
+        const { tests } = resolveThreadOutcomes(thread, discovery([discovered('S flaky'), discovered('S broken')]), settings);
+
+        assert.deepEqual(tests.map((t) => [t.fullTitle, t.failedAttempts, t.failedAttemptsByThreadAttempt]), [
+            ['S flaky', 3, [2, 0, 1]],
+            ['S broken', 2, [1, 0, 1]],
+        ]);
     });
 
     it('fills in tests that did not produce a result when the thread crashed or timed out', () => {

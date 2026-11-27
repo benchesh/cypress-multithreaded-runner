@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
     pluralise,
     arrToNaturalStr,
+    ordinal,
     escapeHtml,
     secondsToNaturalString,
     generatePercentageBar,
@@ -21,6 +22,13 @@ describe('format', () => {
         assert.equal(arrToNaturalStr(['one']), 'One');
         assert.equal(arrToNaturalStr(['one', null, 'two']), 'One and two');
         assert.equal(arrToNaturalStr(['one', 'two', 'three']), 'One, two and three');
+        assert.equal(arrToNaturalStr(['one', 'two'], { capitalise: false }), 'one and two');
+    });
+
+    it('writes ordinals', () => {
+        assert.deepEqual([1, 2, 3, 10, 11, 12, 13, 21, 22, 23, 101, 111].map(ordinal), [
+            'first', 'second', 'third', 'tenth', '11th', '12th', '13th', '21st', '22nd', '23rd', '101st', '111th',
+        ]);
     });
 
     it('escapes html', () => {
