@@ -9,6 +9,7 @@ const path = require('path');
 const { runScenario, generatedResults } = require('../helpers/runScenario');
 const { createTempDir } = require('../helpers/tempDir');
 const { readJsonSafe } = require('../../lib/util/fs');
+const { parse } = require('node-html-parser');
 
 // Every scenario gets its own time limit, rather than the whole suite sharing one: the suite as a whole takes a few
 // minutes, and more with every scenario. A scenario that hangs is cancelled after this long
@@ -600,6 +601,49 @@ describe('runner (real Cypress)', () => {
             assert.equal(run.benchmark.tests.passed, 1);
         } finally {
             run.cleanup();
+        }
+    });
+
+    scenario('links spec files in the report to the URL includeRepoPath gives, or doesn\'t link them when it\'s falsy', async () => {
+        const title = 'links spec files in the report to the URL includeRepoPath gives, or doesn\'t link them when it\'s falsy';
+        const baseUrl = 'https://git.example.com/acme/widgets/blob/abc123';
+        const config = { phases: [{ specsDir: 'cypress/e2e/phase1' }] };
+
+        const withUrl = await runScenario(`${title} (a URL)`, { ...config, includeRepoPath: `${baseUrl}/` });
+        const falsy = await runScenario(`${title} (false)`, { ...config, includeRepoPath: false });
+
+        // (node-html-parser doesn't parse inside <pre> by default, which a browser does, and the summary & logs are in <pre>s)
+        const links = (html, selector) => parse(html, { blockTextElements: { script: true, noscript: true, style: true } })
+            .querySelectorAll(`${selector} a.cmr-spec-link`)
+            .map((a) => [a.getAttribute('href'), a.text]);
+
+        // the URL is followed by the spec file's path within the repo (this one, as the fixture project is inside it)
+        const linked = (spec) => [`${baseUrl}/test/fixtures/cypress-project/cypress/e2e/phase1/${spec}`, `cypress/e2e/phase1/${spec}`];
+
+        try {
+            assert.equal(withUrl.exitCode, 0, withUrl.output);
+            assert.equal(falsy.exitCode, 0, falsy.output);
+
+            ['allure-report/index.html', 'allure-report/complete.html'].forEach((file) => {
+                const html = withUrl.readReportFile(file);
+
+                // the header warns about flaky.cy.js (it needed a retry), and the footer has every thread's heading & the performance summary
+                assert.deepEqual(links(html, '.cmr-header .cmr-warn'), [linked('flaky.cy.js')], file);
+                assert.deepEqual(links(html, '.cmr-footer .cmr-pre-heading'), [linked('flaky.cy.js'), linked('pass.cy.js')], file);
+                assert.deepEqual(links(html, '.cmr-footer .cmr-report pre'), [linked('flaky.cy.js'), linked('pass.cy.js')], file);
+
+                // the logs are left as Cypress printed them
+                assert.deepEqual(links(html, '.cmr-thread-pre'), [], file);
+
+                // when it's falsy, the spec files are only named
+                const unlinked = falsy.readReportFile(file);
+
+                assert.doesNotMatch(unlinked, /cmr-spec-link"/, file);
+                assert.match(unlinked, /Thread #1 \[cypress&#x2F;e2e&#x2F;phase1&#x2F;flaky\.cy\.js\]/, file);
+            });
+        } finally {
+            withUrl.cleanup();
+            falsy.cleanup();
         }
     });
 });

@@ -126,6 +126,13 @@
     color: rgba(246, 250, 254, 0.96);
 }
 
+/* links are mediumblue, which is unreadable on the dark backgrounds above. The selectors outrank
+   the "#cmr-pre-content *" rule above, which would otherwise recolour the links in the logs as plain text */
+[data-theme="dark"] .cmr-content #cmr-pre-content a,
+[data-theme="dark"] .cmr-report a {
+    color: #8ab4f8;
+}
+
 .cmr-content,.cmr-content button {
 font-family: Helvetica, Arial, sans-serif;
     color:black;

@@ -33,6 +33,13 @@ describe('parseCliArgs', () => {
         assert.deepEqual(parseCliArgs(argv('--crash-patterns')).crashPatterns, []);
     });
 
+    it('parses includeRepoPath as a URL, or a flag (including --no-include-repo-path)', () => {
+        assert.equal(parseCliArgs(argv('--include-repo-path', 'https://github.com/acme/widgets/blob/main')).includeRepoPath, 'https://github.com/acme/widgets/blob/main');
+        assert.equal(parseCliArgs(argv('--no-include-repo-path')).includeRepoPath, false);
+        assert.equal(normaliseSettings(parseCliArgs(argv('--include-repo-path', 'false'))).includeRepoPath, false);
+        assert.equal(normaliseSettings(parseCliArgs(argv('--include-repo-path'))).includeRepoPath, true);
+    });
+
     it('parses numbers and dotted options', () => {
         const args = parseCliArgs(argv('--retry-all-failed-specs', '2', '--wait-for-file-exist.timeout', '5'));
 
@@ -76,6 +83,7 @@ describe('normaliseSettings', () => {
         assert.equal(settings.logMode, 1);
         assert.equal(settings.maxThreadRestarts, 5);
         assert.deepEqual(settings.crashPatterns, DEFAULT_CRASH_PATTERNS);
+        assert.equal(settings.includeRepoPath, true);
         assert.equal(settings.notify, true);
         assert.equal(settings.threadDelay, 30);
         assert.equal(settings.stopSubsequentPhasesOnFail, true);
@@ -151,6 +159,16 @@ describe('normaliseSettings', () => {
         // the defaults can't be changed through the settings
         patterns(undefined).push('oops');
         assert.ok(!DEFAULT_CRASH_PATTERNS.includes('oops'));
+    });
+
+    it('normalises includeRepoPath: anything falsy means no links, and only leaving it out means true', () => {
+        const includeRepoPath = (value) => normaliseSettings({ includeRepoPath: value }).includeRepoPath;
+
+        assert.equal(includeRepoPath(undefined), true);
+        assert.equal(includeRepoPath(true), true);
+        [false, null, 0, '', '  ', 'false', 'FALSE', '0', 'no'].forEach((value) => assert.equal(includeRepoPath(value), false, String(value)));
+        ['true', '1', 'yes'].forEach((value) => assert.equal(includeRepoPath(value), true, value));
+        assert.equal(includeRepoPath(' https://github.com/acme/widgets/blob/main '), 'https://github.com/acme/widgets/blob/main');
     });
 
     it('fills in waitForFileExist defaults', () => {

@@ -226,6 +226,7 @@ describe('benchmark', () => {
 
         assert.deepEqual(incomplete.record.order, ['a']);
         assert.match(incomplete.orderReason, /phases did not complete/);
+        assert.equal(incomplete.orderChanged, false);
     });
 
     it('orders spec files using a saved order', () => {
@@ -242,6 +243,158 @@ describe('benchmark', () => {
         assert.deepEqual(fs.readJsonSync(file), { other: { order: [] }, mine: { order: ['x'] } });
         assert.deepEqual(benchmark.loadBenchmarks(temp.file('missing.json')), {});
         temp.cleanup();
+    });
+
+    describe('when the results change between runs', () => {
+        // a thread that ran `spec` for `secs` seconds
+        const timed = (threadNo, spec, secs, outcome = Outcome.PASSED, phaseNo = 1) => Object.assign(thread(threadNo, phaseNo, outcome), { spec, secs });
+
+        const buildRecord = (overrides) => benchmark.buildBenchmarkRecord({
+            identity: { phases: [] },
+            previous: undefined,
+            threads: [],
+            failedSpecs: [],
+            testStats: computeTestStats([test('passed')]),
+            timestamp: 1,
+            ...overrides,
+        });
+
+        it('does not report the order as changed when it matches the saved order, even though the results are different', () => {
+            const previous = { order: ['slow.cy.js', 'fast.cy.js'], successPercentage: 100, fails: [], timestamp: 1 };
+
+            const run = buildRecord({
+                previous,
+                threads: [timed(1, 'fast.cy.js', 5, Outcome.FAILED), timed(2, 'slow.cy.js', 50)],
+                failedSpecs: ['fast.cy.js'],
+                testStats: computeTestStats([test('passed'), test('failed')]),
+                timestamp: 2,
+            });
+
+            assert.equal(run.orderChanged, false);
+            assert.equal(run.orderReason, null);
+
+            // the order is as it was, but the record has the new results
+            assert.deepEqual(run.record.order, previous.order);
+            assert.deepEqual(run.record.fails, ['fast.cy.js']);
+            assert.equal(run.record.successPercentage, 50);
+            assert.equal(run.record.timestamp, 2);
+        });
+
+        it('reports the order as changed the first time a benchmark is recorded, as there is no saved order to match', () => {
+            const run = buildRecord({ previous: undefined, threads: [timed(1, 'fast.cy.js', 5), timed(2, 'slow.cy.js', 50)] });
+
+            assert.equal(run.orderChanged, true);
+            assert.equal(run.orderReason, null);
+            assert.deepEqual(run.record.order, ['slow.cy.js', 'fast.cy.js']);
+        });
+
+        it('reports the order as changed when only the position of one spec file differs', () => {
+            const threads = [timed(1, 'a.cy.js', 30), timed(2, 'b.cy.js', 20), timed(3, 'c.cy.js', 10)];
+
+            assert.equal(buildRecord({ previous: { order: ['a.cy.js', 'b.cy.js', 'c.cy.js'] }, threads }).orderChanged, false);
+            assert.equal(buildRecord({ previous: { order: ['a.cy.js', 'c.cy.js', 'b.cy.js'] }, threads }).orderChanged, true);
+
+            // as does a spec file that's been added or removed
+            assert.equal(buildRecord({ previous: { order: ['a.cy.js', 'b.cy.js'] }, threads }).orderChanged, true);
+            assert.equal(buildRecord({ previous: { order: ['a.cy.js', 'b.cy.js', 'c.cy.js', 'd.cy.js'] }, threads }).orderChanged, true);
+        });
+
+        it('keeps the saved order, without reporting a change, when there aren\'t two different spec files to compare', () => {
+            const cases = {
+                'no threads': [],
+                'a single thread': [timed(1, 'a.cy.js', 5)],
+                'a spec file that ran twice (e.g. with repeat)': [timed(1, 'a.cy.js', 5), timed(2, 'a.cy.js', 9)],
+                'threads that took no time': [timed(1, 'a.cy.js', 5), timed(2, 'b.cy.js', 0)],
+                'threads that never started': [timed(1, 'a.cy.js', 5), timed(2, 'b.cy.js', undefined)],
+            };
+
+            Object.entries(cases).forEach(([name, threads]) => {
+                const run = buildRecord({ previous: { order: ['saved.cy.js', 'other.cy.js'] }, threads });
+
+                assert.deepEqual(run.record.order, ['saved.cy.js', 'other.cy.js'], name);
+                assert.equal(run.orderChanged, false, name);
+                assert.match(run.orderReason, /two or more threads with different files are required to determine the optimal order/, name);
+            });
+        });
+
+        it('keeps the saved order, without reporting a change, when a phase was stopped or never started', () => {
+            [Outcome.STOPPED, Outcome.NOT_RUN].forEach((outcome) => {
+                // enough threads to work out a different order, if the phases had completed
+                const threads = [timed(1, 'fast.cy.js', 5), timed(2, 'slow.cy.js', 50), timed(3, 'later.cy.js', 1, outcome, 2)];
+                const run = buildRecord({ previous: { order: ['fast.cy.js', 'slow.cy.js'] }, threads });
+
+                assert.deepEqual(run.record.order, ['fast.cy.js', 'slow.cy.js'], outcome);
+                assert.equal(run.orderChanged, false, outcome);
+                assert.match(run.orderReason, /one or more phases did not complete/, outcome);
+            });
+        });
+
+        it('replaces the saved record each run, so the file always has the latest results and leaves other benchmarks alone', () => {
+            const temp = createTempDir({ 'bench.json': { other: { order: ['x.cy.js'], successPercentage: 10 } } });
+            const file = temp.file('bench.json');
+            const identity = { phases: [{ specsDir: 'cypress/e2e' }] };
+            const id = benchmark.benchmarkId({ benchmarkDescription: 'nightly' }, identity);
+
+            // what's in the file, as the next run would read it
+            const saved = () => fs.readJsonSync(file);
+            const runAndSave = (overrides) => {
+                const benchmarks = benchmark.loadBenchmarks(file);
+                const run = buildRecord({ identity, previous: benchmarks[id], ...overrides });
+
+                benchmark.saveBenchmark(file, benchmarks, id, run.record);
+
+                return run;
+            };
+            // JSON drops the properties that are undefined
+            const asSaved = (record) => JSON.parse(JSON.stringify(record));
+
+            // run 1: the benchmark's first record
+            const first = runAndSave({
+                threads: [timed(1, 'fast.cy.js', 5), timed(2, 'slow.cy.js', 50, Outcome.FAILED)],
+                failedSpecs: ['slow.cy.js'],
+                testStats: computeTestStats([test('passed'), test('failed')]),
+                timestamp: 1,
+            });
+
+            assert.equal(first.orderChanged, true);
+            assert.deepEqual(saved()[id], asSaved(first.record));
+            assert.deepEqual(saved()[id].order, ['slow.cy.js', 'fast.cy.js']);
+
+            // run 2: everything is different. Everything about the benchmark is replaced, including the order
+            const second = runAndSave({
+                threads: [timed(1, 'fast.cy.js', 80, Outcome.FAILED), timed(2, 'slow.cy.js', 20)],
+                failedSpecs: ['fast.cy.js'],
+                testStats: computeTestStats([test('passed'), test('passed'), test('passed'), test('failed')]),
+                timestamp: 2,
+            });
+
+            assert.equal(second.orderChanged, true);
+            assert.deepEqual(saved()[id], asSaved(second.record));
+            assert.deepEqual(saved()[id].order, ['fast.cy.js', 'slow.cy.js']);
+            assert.deepEqual(saved()[id].fails, ['fast.cy.js']);
+            assert.equal(saved()[id].successPercentage, 75);
+            assert.equal(saved()[id].timestamp, 2);
+
+            // run 3: the same order again, but the spec files failed differently. The order isn't reported as changed, but the record is still replaced
+            const third = runAndSave({
+                threads: [timed(1, 'fast.cy.js', 90), timed(2, 'slow.cy.js', 10, Outcome.FAILED)],
+                failedSpecs: ['slow.cy.js'],
+                testStats: computeTestStats([test('passed'), test('passed'), test('passed'), test('passed')]),
+                timestamp: 3,
+            });
+
+            assert.equal(third.orderChanged, false);
+            assert.deepEqual(saved()[id], asSaved(third.record));
+            assert.deepEqual(saved()[id].fails, ['slow.cy.js']);
+            assert.equal(saved()[id].successPercentage, 100);
+            assert.equal(saved()[id].timestamp, 3);
+
+            // the benchmark that was in the file all along is untouched, and nothing else was added
+            assert.deepEqual(saved().other, { order: ['x.cy.js'], successPercentage: 10 });
+            assert.deepEqual(Object.keys(saved()).sort(), [id, 'other'].sort());
+
+            temp.cleanup();
+        });
     });
 });
 
@@ -312,6 +465,99 @@ describe('Allure report HTML', () => {
         assert.deepEqual(parseFailsFromReport(html), ['a.cy.js']);
 
         temp.cleanup();
+    });
+
+    it('links the spec files in the header and footer to their repo, but not in the logs', () => {
+        const { createSpecLinker } = require('../../lib/report/specLinks');
+        const spec = 'cypress/e2e/login.cy.js';
+        const url = 'https://github.com/acme/widgets/blob/abc123/cypress/e2e/login.cy.js';
+        const linkSpecs = createSpecLinker(new Map([[spec, url]]));
+        const t = thread(1, 1, Outcome.PASSED);
+        t.addTimestampedLog(`Running: ${spec}`);
+
+        const header = buildReportHeader({
+            heading: 'Cypress Multithreaded Runner',
+            status: 'warn',
+            runConfig: {},
+            criticalHtml: null,
+            errors: [],
+            warnings: [`WARNING: Thread #1 [${spec}]: 1 test failed 1 time`],
+            notes: [`The tests in 1 spec file couldn't be counted accurately (${spec})`],
+            browserStackObservabilityURL: null,
+            timestamp: 1,
+            linkSpecs,
+        });
+
+        const footer = buildReportFooter({
+            customLogs: [],
+            threads: [{ status: 'warn', heading: [`Thread #1 [${spec}]`, 'WARNING: 1 test failed 1 time'], logsTimestamped: t.logsTimestamped }],
+            performanceSummary: `[PHASE #1]\n\nThread #1 [${spec}]\n████ 100.00% (2 seconds)`,
+            expandHeader: false,
+            linkSpecs,
+        });
+
+        const { parse } = require('node-html-parser');
+        // (by default node-html-parser doesn't parse inside <pre>, which a browser does, and the summary & logs are in <pre>s)
+        const links = (html, selector) => parse(html, { blockTextElements: { script: true, noscript: true, style: true } })
+            .querySelectorAll(`${selector} a.cmr-spec-link`)
+            .map((a) => [a.getAttribute('href'), a.text]);
+        const linked = [[url, spec]];
+
+        assert.deepEqual(links(header, '.cmr-warn'), linked);
+        assert.deepEqual(links(header, '.cmr-notes'), linked);
+        assert.deepEqual(links(footer, '.cmr-pre-heading'), linked);
+        assert.deepEqual(links(footer, '.cmr-report pre'), linked);
+
+        // the logs are as Cypress printed them
+        assert.deepEqual(links(footer, '.cmr-thread-pre'), []);
+
+        // following a link in a heading mustn't also open/close the thread's logs
+        assert.match(footer, /document\.querySelectorAll\('\.cmr-spec-link'\)[\s\S]*event\.stopPropagation\(\)/);
+    });
+
+    it('makes links readable on the dark backgrounds of the dark theme', () => {
+        const css = fs.readFileSync(path.join(__dirname, '..', '..', 'lib', 'allure', 'html', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+        const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, selectors, body]) => ({ selectors: selectors.split(',').map((selector) => selector.trim()), body }));
+        const declaration = (selector, property) => rules
+            .filter((rule) => rule.selectors.includes(selector))
+            .map((rule) => rule.body.match(new RegExp(`(?:^|[;\\s])${property}\\s*:\\s*([^;]+)`))?.[1].trim())
+            .find(Boolean);
+
+        // [r, g, b] from "#8ab4f8", "#fff" or "rgb(27, 33, 41)"
+        const parseColour = (colour) => {
+            const hex = colour.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)?.[1];
+
+            if (hex) {
+                const full = hex.length === 3 ? [...hex].map((c) => c + c).join('') : hex;
+                return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16));
+            }
+
+            return colour.match(/^rgba?\(([^)]+)\)$/)[1].split(',').slice(0, 3).map(Number);
+        };
+
+        // https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio
+        const luminance = (colour) => {
+            const [r, g, b] = parseColour(colour).map((channel) => {
+                const value = channel / 255;
+                return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+            });
+
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        const contrast = (a, b) => (Math.max(luminance(a), luminance(b)) + 0.05) / (Math.min(luminance(a), luminance(b)) + 0.05);
+
+        const darkBackground = declaration('[data-theme="dark"] .cmr-report', 'background');
+        const linkColour = declaration('[data-theme="dark"] .cmr-report a', 'color');
+
+        // the same colour is used for links in the logs, which have the same background
+        assert.equal(declaration('[data-theme="dark"] .cmr-content #cmr-pre-content', 'background'), darkBackground);
+        assert.equal(declaration('[data-theme="dark"] .cmr-content #cmr-pre-content a', 'color'), linkColour);
+
+        // links are mediumblue by default, which is nearly invisible on the dark background
+        assert.ok(contrast('rgb(0, 0, 205)', darkBackground) < 2, 'mediumblue on the dark background');
+
+        // 4.5 is the WCAG AA contrast for text
+        assert.ok(contrast(linkColour, darkBackground) >= 4.5, `${linkColour} on ${darkBackground} has a contrast of ${contrast(linkColour, darkBackground).toFixed(2)}`);
     });
 
     it('ships the client script and styles', () => {
